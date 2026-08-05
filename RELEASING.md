@@ -98,15 +98,30 @@ gh release create v0.2.0 \
   build/macos-dmg/tessera-0.2.0-macOS-universal.dmg \
   build/macos-dmg/SHA256SUMS.txt \
   --title "Tessera 0.2.0" \
-  --notes-file RELEASE_NOTES.md \
-  --prerelease          # drop this once you reach 1.0
+  --notes-file RELEASE_NOTES.md
 ```
 
 Tag names get a `v` prefix (`v0.2.0`); the CMake version does not (`0.2.0`).
 That is the common convention and worth staying consistent about.
 
-While the version is below 1.0, `--prerelease` is honest signalling: the API,
-the CLI flags and the file layout may still move.
+### Don't use `--prerelease`
+
+It is tempting for a 0.x version, and it costs more than it gives. GitHub
+treats "latest release" as the newest release *not* marked pre-release, so if
+every release carries the flag:
+
+- the repository sidebar shows a bare tag count and a "create a release" prompt,
+  as though you had never published anything
+- `/releases/latest` returns **404**
+- `/releases/latest/download/<asset>` returns 404 too, and that is the URL
+  install scripts, README download buttons and Homebrew casks are built on
+
+The version number already says the software is early. Reserve `--prerelease`
+for genuine release candidates you publish *alongside* a stable one, which is
+the case it was designed for.
+
+If you flag one by accident: `gh release edit <tag> --prerelease=false`. The
+`/latest` endpoint takes a few seconds to catch up afterwards.
 
 ## Release notes
 
