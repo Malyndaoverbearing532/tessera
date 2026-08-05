@@ -1,0 +1,89 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "TESSERA_WITH_ASSIMP": "ON",
+        "TESSERA_WITH_UI": "ON",
+        "TESSERA_BACKEND_OPENGL": "ON"
+      }
+    },
+    {
+      "name": "macos",
+      "inherits": "base",
+      "displayName": "macOS (Release)",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "macos-debug",
+      "inherits": "macos",
+      "displayName": "macOS (Debug)",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "macos-metal",
+      "inherits": "macos",
+      "displayName": "macOS + Metal backend",
+      "cacheVariables": {
+        "TESSERA_BACKEND_METAL": "ON"
+      }
+    },
+    {
+      "name": "macos-universal",
+      "inherits": "macos",
+      "displayName": "macOS universal binary, dependencies from source",
+      "cacheVariables": {
+        "CMAKE_OSX_ARCHITECTURES": "arm64;x86_64",
+        "TESSERA_PREFER_BUNDLED_DEPS": "ON"
+      }
+    },
+    {
+      "name": "macos-dmg",
+      "inherits": "macos-universal",
+      "displayName": "macOS .app bundle + .dmg installer (redistributable)",
+      "cacheVariables": {
+        "TESSERA_MACOS_BUNDLE": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "macos",
+      "configurePreset": "macos"
+    },
+    {
+      "name": "macos-debug",
+      "configurePreset": "macos-debug"
+    },
+    {
+      "name": "macos-metal",
+      "configurePreset": "macos-metal"
+    },
+    {
+      "name": "macos-universal",
+      "configurePreset": "macos-universal"
+    },
+    {
+      "name": "macos-dmg",
+      "configurePreset": "macos-dmg"
+    }
+  ]
+}

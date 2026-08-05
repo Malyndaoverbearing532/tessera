@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>                    <string>Tessera</string>
+    <key>CFBundleDisplayName</key>             <string>Tessera</string>
+    <key>CFBundleIdentifier</key>              <string>${MACOSX_BUNDLE_GUI_IDENTIFIER}</string>
+    <key>CFBundleExecutable</key>              <string>${MACOSX_BUNDLE_EXECUTABLE_NAME}</string>
+    <key>CFBundleIconFile</key>                <string>tessera</string>
+    <key>CFBundlePackageType</key>             <string>APPL</string>
+    <key>CFBundleInfoDictionaryVersion</key>   <string>6.0</string>
+    <key>CFBundleVersion</key>                 <string>${MACOSX_BUNDLE_BUNDLE_VERSION}</string>
+    <key>CFBundleShortVersionString</key>      <string>${MACOSX_BUNDLE_SHORT_VERSION_STRING}</string>
+    <key>LSMinimumSystemVersion</key>          <string>${CMAKE_OSX_DEPLOYMENT_TARGET}</string>
+    <key>LSApplicationCategoryType</key>       <string>public.app-category.graphics-design</string>
+    <key>NSHumanReadableCopyright</key>        <string>${MACOSX_BUNDLE_COPYRIGHT}</string>
+
+    <!-- Retina: without this the window is upscaled from a 1x backing store. -->
+    <key>NSHighResolutionCapable</key>         <true/>
+
+    <!-- Discrete GPU only when the workload needs it, which matters on laptops. -->
+    <key>NSSupportsAutomaticGraphicsSwitching</key> <true/>
+
+    <!--
+        File associations. "Alternate" rank means tessera offers itself in Open With
+        without seizing these types from whatever already owns them.
+        Double-clicked files arrive as a kAEOpenDocuments Apple Event, which
+        src/app/PlatformIntegration_mac.mm handles.
+    -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>        <string>3D Model</string>
+            <key>CFBundleTypeRole</key>        <string>Viewer</string>
+            <key>LSHandlerRank</key>           <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.3d-content</string>
+                <string>public.geometry-definition-format</string>
+                <string>public.polygon-file-format</string>
+                <string>public.standard-tesselated-geometry-format</string>
+            </array>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>obj</string>
+                <string>stl</string>
+                <string>ply</string>
+                <string>gltf</string>
+                <string>glb</string>
+                <string>fbx</string>
+                <string>dae</string>
+                <string>3ds</string>
+                <string>3mf</string>
+                <string>blend</string>
+                <string>off</string>
+                <string>x3d</string>
+                <string>dxf</string>
+                <string>lwo</string>
+                <string>ms3d</string>
+                <string>md5mesh</string>
+                <string>ase</string>
+                <string>ac</string>
+                <string>stp</string>
+                <string>step</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>
