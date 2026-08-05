@@ -68,10 +68,10 @@ Do not skip this. It takes a minute and catches the embarrassing failures.
 DMG=build/macos-dmg/tessera-0.2.0-macOS-universal.dmg
 MP=$(hdiutil attach "$DMG" -nobrowse -readonly | sed -n 's|.*\(/Volumes/.*\)|\1|p' | tail -1)
 
-lipo -archs "$MP/Tessera.app/Contents/MacOS/tessera"        # expect: x86_64 arm64
-otool -L "$MP/Tessera.app/Contents/MacOS/tessera" \
+lipo -archs "$MP/Tessera.app/Contents/MacOS/Tessera"        # expect: x86_64 arm64
+otool -L "$MP/Tessera.app/Contents/MacOS/Tessera" \
   | grep -v '/usr/lib/\|/System/'                           # expect: nothing
-"$MP/Tessera.app/Contents/MacOS/tessera" --version          # expect: the new version
+"$MP/Tessera.app/Contents/MacOS/Tessera" --version          # expect: the new version
 codesign -dv "$MP/Tessera.app" 2>&1 | grep Signature        # expect: adhoc
 
 hdiutil detach "$MP"

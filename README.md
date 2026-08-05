@@ -79,7 +79,7 @@ drag Tessera to Applications.
 The bundled binary is the same one the CLI modes use:
 
 ```bash
-ln -s /Applications/Tessera.app/Contents/MacOS/tessera /usr/local/bin/tessera
+ln -s /Applications/Tessera.app/Contents/MacOS/Tessera /usr/local/bin/tessera
 ```
 
 ## Three ways to run it

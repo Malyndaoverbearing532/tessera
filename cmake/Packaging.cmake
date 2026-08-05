@@ -27,11 +27,15 @@ function(tessera_configure_bundle target)
     set(MACOSX_BUNDLE_GUI_IDENTIFIER       "com.sarpsoykan.tessera")
     set(MACOSX_BUNDLE_BUNDLE_VERSION       "${PROJECT_VERSION}")
     set(MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}")
-    set(MACOSX_BUNDLE_EXECUTABLE_NAME      "tessera")
+    set(MACOSX_BUNDLE_EXECUTABLE_NAME      "Tessera")
     set(MACOSX_BUNDLE_COPYRIGHT            "MIT licensed")
 
+    # Capitalised only inside the bundle: macOS applications are conventionally
+    # "Tessera.app", while the development build stays lowercase `tessera` so
+    # the command line keeps its usual shape.
     set_target_properties(${target} PROPERTIES
         MACOSX_BUNDLE TRUE
+        OUTPUT_NAME "Tessera"
         MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/packaging/Info.plist.in)
 
     # Listing the icon as a source is how it lands in Contents/Resources.
