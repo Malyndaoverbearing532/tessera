@@ -3,7 +3,27 @@ name: CI
 on:
   push:
     branches: [main]
+    # Prose changes cannot break the build, and a full matrix run costs about
+    # fifteen minutes of Windows compilation. workflow_dispatch below is always
+    # available if you want to force a run anyway.
+    #
+    # Note for later: if branch protection with required checks is ever added,
+    # a skipped run leaves a pull request waiting, so these filters would need
+    # revisiting.
+    #
+    # Listed twice rather than shared with a YAML anchor: GitHub's workflow
+    # parser does not support anchors or aliases.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
   pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
   workflow_dispatch:
 
 # A newer push supersedes an in-flight run for the same ref.
