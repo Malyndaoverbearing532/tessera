@@ -74,9 +74,15 @@ if(TESSERA_BACKEND_OPENGL)
     FetchContent_MakeAvailable(glad_source)
 
     set(TESSERA_GLAD_DIR ${CMAKE_BINARY_DIR}/glad)
+    # PYTHONUTF8=1 is not optional on Windows. glad opens its bundled gl.xml in
+    # text mode, so Python falls back to the locale encoding: cp1252 on a
+    # default Windows install. The UTF-8 bytes then decode into mojibake and
+    # the XML parser fails on the first character. UTF-8 mode forces the
+    # interpreter to read it correctly, and is a no-op elsewhere.
     add_custom_command(
         OUTPUT  ${TESSERA_GLAD_DIR}/src/glad.c ${TESSERA_GLAD_DIR}/include/glad/glad.h
-        COMMAND ${Python3_EXECUTABLE} -m glad --profile core --api "gl=3.3"
+        COMMAND ${CMAKE_COMMAND} -E env PYTHONUTF8=1
+                ${Python3_EXECUTABLE} -m glad --profile core --api "gl=3.3"
                 --generator c --spec gl --reproducible --out-path ${TESSERA_GLAD_DIR}
         WORKING_DIRECTORY ${glad_source_SOURCE_DIR}
         COMMENT "Generating OpenGL 3.3 core loader with glad"

@@ -158,10 +158,12 @@ void main() {
     float metallic = uMetallic;
     float roughness = uRoughness;
     if (uHasMetallicRoughnessMap == 1) {
-        // glTF packing: G = roughness, B = metallic.
-        vec3 packed = texture(uMetallicRoughnessMap, vUv).rgb;
-        roughness *= packed.g;
-        metallic *= packed.b;
+        // glTF packing: G = roughness, B = metallic. Not named `packed`:
+        // that is a reserved GLSL keyword, which Apple's compiler tolerates
+        // and Mesa rightly rejects.
+        vec3 sampled = texture(uMetallicRoughnessMap, vUv).rgb;
+        roughness *= sampled.g;
+        metallic *= sampled.b;
     }
     roughness = clamp(roughness, 0.03, 1.0);
     metallic = clamp(metallic, 0.0, 1.0);

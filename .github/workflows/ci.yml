@@ -45,6 +45,10 @@ jobs:
         with:
           path: build/_deps
           key: ${{ runner.os }}-deps-${{ hashFiles('cmake/Dependencies.cmake') }}
+          # Editing the dependency script changes the key. Falling back to the
+          # newest older cache means CMake rebuilds only what actually moved,
+          # instead of Windows compiling Assimp from nothing every time.
+          restore-keys: ${{ runner.os }}-deps-
 
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
