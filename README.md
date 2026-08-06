@@ -32,6 +32,7 @@ doubles as a format converter and a headless thumbnailer.
 - [Formats](#formats)
 - [Controls](#controls)
 - [Building from source](#building-from-source)
+- [Tests](#tests)
 - [Architecture](#architecture)
 - [Adding a format](#adding-a-format)
 - [Render backends](#render-backends)
@@ -188,6 +189,25 @@ cd build/macos-dmg && cpack
 The bundle is self-contained: `TESSERA_PREFER_BUNDLED_DEPS` compiles every
 dependency from a pinned revision, so nothing links against Homebrew. See
 [RELEASING.md](RELEASING.md) for the full release procedure.
+
+### Tests
+
+```bash
+ctest --test-dir build --output-on-failure
+```
+
+Fifteen smoke tests, split by label so they stay useful on machines without a
+graphics context:
+
+| Label | Covers | Needs a GPU? |
+| --- | --- | --- |
+| `cli` | argument handling, the importer and exporter registries | no |
+| `convert` | every native reader, plus a round trip through Assimp | no |
+| `render` | headless PNG output, checked down to the file signature | yes |
+
+`ctest -LE render` runs everything that works anywhere, which is most of the
+project: `tessera_core` links without OpenGL, so the whole import and export
+path is testable headless. `ctest -L render` runs just the graphics tests.
 
 ### Options
 
