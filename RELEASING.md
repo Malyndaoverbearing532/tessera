@@ -51,8 +51,20 @@ git commit -am "Release 0.2.0"
 
 ### 2. Wait for CI to go green on that commit
 
+**Check by commit, not by "the latest run".** These are not the same thing, and
+confusing them is how a release gets published on the strength of a green tick
+belonging to an earlier commit:
+
 ```bash
-gh run list --limit 1
+gh api "repos/sarp64/tessera/actions/runs?head_sha=$(git rev-parse HEAD)" \
+  --jq '.workflow_runs[] | "\(.status) \(.conclusion)"'
+```
+
+An empty result means **no run exists**, which is not the same as passing. Push
+events do occasionally fail to create one. Force it with:
+
+```bash
+gh workflow run ci.yml --ref main
 ```
 
 Do not skip ahead. The `.dmg` is built and tested only on macOS, so a release
