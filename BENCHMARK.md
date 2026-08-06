@@ -99,7 +99,7 @@ Release build, 1280x800, median of three interleaved runs.
 | Commit | `many.obj` | `heavy.stl` |
 | --- | --- | --- |
 | Before the draw-path work | 17.5 ms (57 fps) | 2.9 ms (345 fps) |
-| After the draw-path work | 7.5 ms (133 fps) | 2.9 ms (345 fps) |
+| After the draw-path work | 7.9 ms (127 fps) | 2.9 ms (345 fps) |
 
 The heavy scene is unchanged, which is the expected and desired outcome: it was
 GPU-bound before and is GPU-bound now. Nothing done to the CPU side could help
