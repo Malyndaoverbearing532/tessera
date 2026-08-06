@@ -35,6 +35,7 @@ option(TESSERA_WITH_ASSIMP "Enable the Assimp importer/exporter backend (~50 for
 option(TESSERA_WITH_UI     "Build the Dear ImGui interface"                            ON)
 option(TESSERA_WERROR      "Treat warnings as errors"                                  OFF)
 option(TESSERA_INSTALL     "Generate install rules"                                    ON)
+option(TESSERA_BUILD_TESTS "Build the smoke tests (ctest)"                             ON)
 
 # Package-manager copies are convenient but are built against whatever the host
 # runs, which on macOS means a Homebrew dylib can carry a newer minimum OS than
@@ -59,6 +60,11 @@ include(Dependencies)
 include(Packaging)  # defines the bundling helpers used inside src/
 
 add_subdirectory(src)
+
+if(TESSERA_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
 
 # Install and CPack rules need the target to exist first.
 tessera_add_install_rules()

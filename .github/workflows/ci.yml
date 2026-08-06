@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push supersedes an in-flight run for the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      # Without this, one platform failing cancels the others and you only
+      # learn about a single problem per run.
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: Linux
+          - os: windows-latest
+            name: Windows
+          - os: macos-latest
+            name: macOS
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Used once, to generate the OpenGL loader from glad's bundled spec.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Dependencies built from source are the slow part, overwhelmingly
+      # Assimp. Caching them keyed on the dependency script means only the
+      # first run on each platform pays for it.
+      - name: Cache fetched dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: ${{ runner.os }}-deps-${{ hashFiles('cmake/Dependencies.cmake') }}
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          # Build dependencies for GLFW, plus system copies of the libraries so
+          # the find_package-first path is exercised rather than always fetching.
+          sudo apt-get install -y \
+            libgl1-mesa-dev libx11-dev libxrandr-dev libxinerama-dev \
+            libxcursor-dev libxi-dev libwayland-dev libxkbcommon-dev \
+            wayland-protocols \
+            libassimp-dev libglm-dev libglfw3-dev
+          # Software rasteriser and a virtual display, so the render tests have
+          # a real OpenGL 3.3 context on a machine with no GPU.
+          sudo apt-get install -y xvfb libgl1-mesa-dri mesa-utils
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install assimp glfw glm
+
+      # Windows gets no system packages, so everything comes from FetchContent.
+      # That is the slowest configuration and the one the cache matters most for.
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DTESSERA_WERROR=OFF
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      # Listing the tests works identically on every shell, unlike most things.
+      - name: List tests
+        run: ctest --test-dir build -C Release -N
+
+      # Everything that needs no graphics context. tessera_core links without
+      # OpenGL, so the whole import and export path is covered here, on every
+      # platform.
+      - name: Test (headless, no graphics context)
+        run: ctest --test-dir build -C Release --output-on-failure --label-exclude render
+
+      - name: Test (rendering, Linux under Xvfb)
+        if: runner.os == 'Linux'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          GALLIUM_DRIVER: llvmpipe
+        run: xvfb-run -a ctest --test-dir build -C Release --output-on-failure --label-regex render
+
+      # GitHub's macOS runners are virtualised and their OpenGL support is not
+      # guaranteed. Informational until we know whether it is reliable.
+      - name: Test (rendering, macOS)
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        run: ctest --test-dir build -C Release --output-on-failure --label-regex render
+
+      # Windows runners fall back to Microsoft's OpenGL 1.1 software
+      # implementation, so creating a 3.3 core context fails. Rendering is not
+      # attempted here; it needs Mesa's llvmpipe DLLs dropped in first.
+      - name: Rendering skipped (Windows)
+        if: runner.os == 'Windows'
+        run: echo "Skipped - the runner offers only OpenGL 1.1, below the 3.3 core requirement."
+
+      - name: Upload rendered output
+        if: always() && runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-${{ matrix.name }}
+          path: build/tests/output/*.png
+          if-no-files-found: ignore
