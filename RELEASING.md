@@ -49,7 +49,20 @@ Commit it on its own so the tag points at something meaningful.
 git commit -am "Release 0.2.0"
 ```
 
-### 2. Build the installer
+### 2. Wait for CI to go green on that commit
+
+```bash
+gh run list --limit 1
+```
+
+Do not skip ahead. The `.dmg` is built and tested only on macOS, so a release
+published before CI finishes has never been compiled on Linux or Windows. You
+would find out from a bug report instead of from a build log.
+
+Note that a version bump touches `CMakeLists.txt`, so it always triggers a full
+matrix run even when everything else in the push is documentation.
+
+### 3. Build the installer
 
 ```bash
 cmake --preset macos-dmg
@@ -60,7 +73,7 @@ cd build/macos-dmg && cpack
 A cold build takes about ten minutes, because Assimp is compiled from source, twice,
 once per architecture. Incremental rebuilds are seconds.
 
-### 3. Verify before you publish
+### 4. Verify before you publish
 
 Do not skip this. It takes a minute and catches the embarrassing failures.
 
@@ -81,14 +94,14 @@ The `otool` check is the important one: any Homebrew path in that output means
 the build picked up a system library and the `.dmg` will fail on a machine that
 does not have it.
 
-### 4. Checksums
+### 5. Checksums
 
 ```bash
 cd build/macos-dmg
 shasum -a 256 tessera-0.2.0-macOS-universal.dmg > SHA256SUMS.txt
 ```
 
-### 5. Tag and publish
+### 6. Tag and publish
 
 ```bash
 git tag -a v0.2.0 -m "Tessera 0.2.0"
