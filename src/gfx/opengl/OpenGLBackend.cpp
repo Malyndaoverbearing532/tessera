@@ -188,11 +188,22 @@ void OpenGLBackend::ensureLineGeometry() {
 }
 
 void OpenGLBackend::shutdown() {
+    // Every GL object has to be released here, while the context is still
+    // current. Anything left for a member destructor gets deleted after the
+    // context is gone, which macOS quietly ignores and Mesa turns into a
+    // segmentation fault.
     gpuMeshes_.clear();
     gpuTextures_.clear();
     whiteTexture_.destroy();
     flatNormalTexture_.destroy();
     blackTexture_.destroy();
+
+    // Move-assigning an empty Shader deletes the program it was holding.
+    meshShader_ = Shader{};
+    lineShader_ = Shader{};
+    normalsShader_ = Shader{};
+    gridShader_ = Shader{};
+    backgroundShader_ = Shader{};
 
     if (boxVbo_ != 0) glDeleteBuffers(1, &boxVbo_);
     if (boxVao_ != 0) glDeleteVertexArrays(1, &boxVao_);
@@ -202,6 +213,7 @@ void OpenGLBackend::shutdown() {
     boxVao_ = boxVbo_ = measureVao_ = measureVbo_ = emptyVao_ = 0;
     measureCapacity_ = 0;
     scene_ = nullptr;
+    initialized_ = false;
 }
 
 void OpenGLBackend::setScene(const scene::Scene* scene) {

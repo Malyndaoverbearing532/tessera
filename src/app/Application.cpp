@@ -572,6 +572,9 @@ int Application::run(const Options& options) {
 
     ui_.shutdown();
     renderer_->shutdown();
+    // Release the backend entirely before GLFW tears the context down, so no
+    // GL object outlives the context it belongs to.
+    renderer_.reset();
     destroyWindow();
     return 0;
 }
@@ -660,6 +663,9 @@ int Application::runHeadlessRender(const Options& options) {
         }
     }
 
+    // Same ordering rule as the interactive path: the backend must be gone
+    // before the context is.
+    renderer.reset();
     glfwDestroyWindow(window);
     glfwTerminate();
     return exitCode;
