@@ -62,6 +62,27 @@ private:
         bool blended = false;
         bool baked = false;    /// transform already in the vertex buffer
         bool culled = false;   /// recomputed every frame from the frustum
+
+        /// Where this mesh lives when it was merged into a batch. -1 means it
+        /// is drawn on its own from gpuMeshes_.
+        int batch = -1;
+        GLsizei indexOffset = 0;
+        GLsizei indexCount = 0;
+        GLsizei vertexOffset = 0;
+        GLsizei vertexCount = 0;
+    };
+
+    /// Opaque meshes sharing a material, concatenated into one buffer in world
+    /// space so they can be drawn together.
+    ///
+    /// The batch is built once and never rebuilt. Hiding a mesh or culling it
+    /// only changes which index ranges get submitted, which is what makes this
+    /// affordable: toggling visibility never touches a GPU buffer.
+    struct Batch {
+        int material = -1;
+        GpuMesh mesh;
+        /// Indices into drawList_, in the order their geometry was appended.
+        std::vector<int> items;
     };
 
     /// The pass itself, with no framebuffer binding of its own, so both the
@@ -89,7 +110,17 @@ private:
     /// True where the world transform is already folded into the vertex buffer.
     std::vector<bool> transformBaked_;
     std::vector<DrawItem> drawList_;
+    std::vector<Batch> batches_;
     bool drawListDirty_ = true;
+
+    /// Submits a batch's visible ranges, merging consecutive ones so a fully
+    /// visible batch costs a single draw call.
+    /// Draws one item, whether it owns a buffer or lives inside a batch. The
+    /// overlays need this because they address a single mesh at a time.
+    void drawItemGeometry(const DrawItem& item);
+    void drawItemPoints(const DrawItem& item);
+    void drawBatch(const Batch& batch);
+    void buildBatches();
 
     Shader meshShader_;
     Shader lineShader_;

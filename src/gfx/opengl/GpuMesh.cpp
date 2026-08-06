@@ -115,6 +115,66 @@ void GpuMesh::upload(const scene::Mesh& mesh, const mat4& bakeTransform) {
     primitiveCount_ = mesh.primitiveCount();
 }
 
+void GpuMesh::uploadMerged(const std::vector<scene::Vertex>& vertices,
+                           const std::vector<std::uint32_t>& indices) {
+    destroy();
+    if (vertices.empty() || indices.empty()) return;
+
+    mode_ = GL_TRIANGLES;
+    indexed_ = true;
+
+    glGenVertexArrays(1, &vao_);
+    glBindVertexArray(vao_);
+
+    const std::size_t vertexBytes = vertices.size() * sizeof(scene::Vertex);
+    glGenBuffers(1, &vbo_);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertexBytes), vertices.data(),
+                 GL_STATIC_DRAW);
+
+    const auto stride = static_cast<GLsizei>(sizeof(scene::Vertex));
+    const auto offsetOf = [](std::size_t bytes) { return reinterpret_cast<const void*>(bytes); };
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, offsetOf(offsetof(scene::Vertex, position)));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride, offsetOf(offsetof(scene::Vertex, normal)));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, stride, offsetOf(offsetof(scene::Vertex, tangent)));
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, stride, offsetOf(offsetof(scene::Vertex, uv)));
+    glEnableVertexAttribArray(4);
+    glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, stride, offsetOf(offsetof(scene::Vertex, color)));
+
+    const std::size_t indexBytes = indices.size() * sizeof(std::uint32_t);
+    glGenBuffers(1, &ebo_);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo_);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(indexBytes), indices.data(),
+                 GL_STATIC_DRAW);
+
+    glBindVertexArray(0);
+
+    elementCount_ = static_cast<GLsizei>(indices.size());
+    vertexCount_ = static_cast<GLsizei>(vertices.size());
+    byteSize_ = vertexBytes + indexBytes;
+    primitiveCount_ = indices.size() / 3;
+}
+
+void GpuMesh::drawPointsRange(GLsizei vertexOffset, GLsizei vertexCount) const {
+    if (vao_ == 0 || vertexCount <= 0) return;
+    glDrawArrays(GL_POINTS, vertexOffset, vertexCount);
+}
+
+void GpuMesh::bind() const {
+    if (vao_ != 0) glBindVertexArray(vao_);
+}
+
+void GpuMesh::drawRange(GLsizei indexOffset, GLsizei indexCount) const {
+    if (vao_ == 0 || indexCount <= 0) return;
+    glDrawElements(mode_, indexCount, GL_UNSIGNED_INT,
+                   reinterpret_cast<const void*>(static_cast<std::uintptr_t>(indexOffset) *
+                                                 sizeof(std::uint32_t)));
+}
+
 void GpuMesh::draw() const {
     if (vao_ == 0 || elementCount_ == 0) return;
     glBindVertexArray(vao_);

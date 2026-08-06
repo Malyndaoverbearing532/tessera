@@ -22,12 +22,29 @@ public:
     /// have its transform folded in once here instead of being sent as two
     /// uniform matrices on every draw of every frame.
     void upload(const scene::Mesh& mesh, const mat4& bakeTransform = mat4(1.0f));
+
+    /// Uploads geometry already assembled on the CPU, used for merged batches.
+    /// Always indexed triangles, because that is the only thing worth merging.
+    void uploadMerged(const std::vector<scene::Vertex>& vertices,
+                      const std::vector<std::uint32_t>& indices);
+
     void destroy();
 
     /// Draws with the mesh's own topology.
     void draw() const;
     /// Draws as GL_POINTS regardless of topology (used by the normals overlay).
     void drawPoints() const;
+
+    /// Draws a slice of the index buffer. Lets one merged batch stand in for
+    /// many meshes while still allowing individual ones to be hidden, culled or
+    /// highlighted.
+    void drawRange(GLsizei indexOffset, GLsizei indexCount) const;
+
+    /// Draws a slice of the vertex buffer as points, for the normals overlay.
+    void drawPointsRange(GLsizei vertexOffset, GLsizei vertexCount) const;
+
+    /// Binds without drawing, for callers issuing several ranges in a row.
+    void bind() const;
 
     [[nodiscard]] bool valid() const { return vao_ != 0; }
     [[nodiscard]] std::size_t byteSize() const { return byteSize_; }

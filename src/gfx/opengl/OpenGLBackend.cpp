@@ -195,6 +195,7 @@ void OpenGLBackend::shutdown() {
     // context is gone, which macOS quietly ignores and Mesa turns into a
     // segmentation fault.
     gpuMeshes_.clear();
+    batches_.clear();
     gpuTextures_.clear();
     whiteTexture_.destroy();
     flatNormalTexture_.destroy();
@@ -225,6 +226,7 @@ void OpenGLBackend::setScene(const scene::Scene* scene) {
     gpuTextures_.clear();
     meshVisible_.clear();
     drawList_.clear();
+    batches_.clear();
     drawListDirty_ = true;
     selectedMesh_ = -1;
     measurePoints_.clear();
@@ -233,31 +235,12 @@ void OpenGLBackend::setScene(const scene::Scene* scene) {
 
     if (!scene) return;
 
-    // A mesh drawn at exactly one place in the hierarchy can have its world
-    // transform folded into the vertex buffer, which removes two uniform matrix
-    // uploads per draw for the rest of the session. Meshes instanced at several
-    // nodes cannot, and keep the per-draw path.
     const std::size_t meshCount = scene->meshes.size();
-    std::vector<int> instances(meshCount, 0);
-    std::vector<mat4> firstTransform(meshCount, mat4(1.0f));
-    scene->forEachMeshInstance([&](int, int meshIndex, const mat4& world) {
-        const auto index = static_cast<std::size_t>(meshIndex);
-        if (instances[index] == 0) firstTransform[index] = world;
-        ++instances[index];
-    });
-
     gpuMeshes_.resize(meshCount);
     meshVisible_.assign(meshCount, true);
     transformBaked_.assign(meshCount, false);
 
     std::size_t bytes = 0;
-    for (std::size_t i = 0; i < meshCount; ++i) {
-        transformBaked_[i] = instances[i] == 1;
-        gpuMeshes_[i].upload(scene->meshes[i],
-                             transformBaked_[i] ? firstTransform[i] : mat4(1.0f));
-        bytes += gpuMeshes_[i].byteSize();
-    }
-
     gpuTextures_.resize(scene->images.size());
     for (std::size_t i = 0; i < scene->images.size(); ++i) {
         gpuTextures_[i].upload(scene->images[i]);
@@ -266,12 +249,13 @@ void OpenGLBackend::setScene(const scene::Scene* scene) {
 
     sceneBounds_ = scene->bounds();
     stats_.gpuBytes = bytes;
+
+    // Geometry is uploaded by buildBatches() on the first frame instead of
+    // here, because whether a mesh gets its own buffer or is merged into a
+    // shared one depends on the draw list, which does not exist yet.
+    drawListDirty_ = true;
     stats_.gpuUploadSeconds =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-
-    log::info("uploaded {} meshes and {} textures ({:.1f} MB) in {:.3f}s", gpuMeshes_.size(),
-              gpuTextures_.size(), static_cast<double>(bytes) / (1024.0 * 1024.0),
-              stats_.gpuUploadSeconds);
     TESSERA_GL_CHECK("OpenGLBackend::setScene");
 }
 
@@ -279,7 +263,6 @@ void OpenGLBackend::setMeshVisible(int meshIndex, bool visible) {
     if (meshIndex >= 0 && meshIndex < static_cast<int>(meshVisible_.size())) {
         meshVisible_[static_cast<std::size_t>(meshIndex)] = visible;
     }
-    drawListDirty_ = true;
 }
 
 bool OpenGLBackend::meshVisible(int meshIndex) const {
@@ -289,7 +272,6 @@ bool OpenGLBackend::meshVisible(int meshIndex) const {
 
 void OpenGLBackend::showAllMeshes() {
     meshVisible_.assign(meshVisible_.size(), true);
-    drawListDirty_ = true;
 }
 
 void OpenGLBackend::rebuildDrawList() {
@@ -297,17 +279,18 @@ void OpenGLBackend::rebuildDrawList() {
     drawListDirty_ = false;
     if (!scene_) return;
 
+    // Every instance is listed, including hidden ones: batches are built from
+    // this list and never rebuilt, so visibility is applied when drawing.
     scene_->forEachMeshInstance([&](int, int meshIndex, const mat4& world) {
-        if (!meshVisible(meshIndex)) return;
         const scene::Mesh& mesh = scene_->meshes[static_cast<std::size_t>(meshIndex)];
 
         DrawItem item;
         item.meshIndex = meshIndex;
         item.material = mesh.material;
-        const bool baked = transformBaked_[static_cast<std::size_t>(meshIndex)];
-        item.baked = baked;
-        item.world = baked ? mat4(1.0f) : world;
-        item.normalMatrix = baked ? mat3(1.0f) : glm::transpose(glm::inverse(mat3(world)));
+        // The true transform is kept here; buildBatches() decides whether it
+        // gets folded into a buffer and replaced with the identity.
+        item.world = world;
+        item.normalMatrix = glm::transpose(glm::inverse(mat3(world)));
         item.worldBounds = mesh.bounds.transformed(world);
         if (mesh.material >= 0 && mesh.material < static_cast<int>(scene_->materials.size())) {
             item.blended =
@@ -326,6 +309,190 @@ void OpenGLBackend::rebuildDrawList() {
         if (a.blended != b.blended) return !a.blended;
         return a.material < b.material;
     });
+
+    buildBatches();
+}
+
+void OpenGLBackend::buildBatches() {
+    batches_.clear();
+    if (!scene_) return;
+
+    const auto start = std::chrono::steady_clock::now();
+    const std::size_t meshCount = scene_->meshes.size();
+
+    // How many places each mesh is drawn from. A mesh used once can have its
+    // transform folded in; one used repeatedly cannot, because a single buffer
+    // cannot hold two different world positions for the same vertices.
+    std::vector<int> instances(meshCount, 0);
+    for (const DrawItem& item : drawList_) {
+        ++instances[static_cast<std::size_t>(item.meshIndex)];
+    }
+
+    const auto batchable = [&](const DrawItem& item) {
+        const scene::Mesh& mesh = scene_->meshes[static_cast<std::size_t>(item.meshIndex)];
+        return !item.blended && mesh.topology == scene::Topology::Triangles &&
+               !mesh.vertices.empty() && instances[static_cast<std::size_t>(item.meshIndex)] == 1;
+    };
+
+    // drawList_ is already grouped by material, so equal materials are adjacent
+    // and one pass produces one batch per material.
+    std::vector<scene::Vertex> vertices;
+    std::vector<std::uint32_t> indices;
+    int currentMaterial = -2;
+
+    const auto flush = [&]() {
+        if (indices.empty()) return;
+        batches_.back().mesh.uploadMerged(vertices, indices);
+        vertices.clear();
+        indices.clear();
+    };
+
+    for (std::size_t i = 0; i < drawList_.size(); ++i) {
+        DrawItem& item = drawList_[i];
+        if (!batchable(item)) continue;
+
+        if (item.material != currentMaterial) {
+            flush();
+            currentMaterial = item.material;
+            batches_.push_back(Batch{});
+            batches_.back().material = item.material;
+        }
+
+        const scene::Mesh& mesh = scene_->meshes[static_cast<std::size_t>(item.meshIndex)];
+        const mat3 normalMatrix = glm::transpose(glm::inverse(mat3(item.world)));
+        const auto baseVertex = static_cast<std::uint32_t>(vertices.size());
+
+        // Vertices go in already transformed, so the whole batch shares one
+        // identity model matrix and needs no per-mesh uniforms at all.
+        vertices.reserve(vertices.size() + mesh.vertices.size());
+        for (const scene::Vertex& source : mesh.vertices) {
+            scene::Vertex vertex = source;
+            vertex.position = vec3(item.world * vec4(source.position, 1.0f));
+            vertex.normal = glm::normalize(normalMatrix * source.normal);
+            vertex.tangent = vec4(glm::normalize(normalMatrix * vec3(source.tangent)),
+                                  source.tangent.w);
+            vertices.push_back(vertex);
+        }
+
+        item.batch = static_cast<int>(batches_.size()) - 1;
+        item.vertexOffset = static_cast<GLsizei>(baseVertex);
+        item.vertexCount = static_cast<GLsizei>(mesh.vertices.size());
+        item.indexOffset = static_cast<GLsizei>(indices.size());
+
+        if (mesh.indices.empty()) {
+            for (std::uint32_t v = 0; v < mesh.vertices.size(); ++v) {
+                indices.push_back(baseVertex + v);
+            }
+        } else {
+            for (std::uint32_t index : mesh.indices) indices.push_back(baseVertex + index);
+        }
+        item.indexCount = static_cast<GLsizei>(indices.size()) - item.indexOffset;
+
+        item.baked = true;
+        item.world = mat4(1.0f);
+        item.normalMatrix = mat3(1.0f);
+        batches_.back().items.push_back(static_cast<int>(i));
+    }
+    flush();
+
+    // Anything not merged still needs a buffer of its own. Single-instance
+    // meshes can at least have their transform folded in.
+    std::vector<bool> uploaded(meshCount, false);
+    for (DrawItem& item : drawList_) {
+        const auto meshIndex = static_cast<std::size_t>(item.meshIndex);
+        if (item.batch >= 0) continue;
+
+        const bool bake = instances[meshIndex] == 1;
+        if (!uploaded[meshIndex]) {
+            gpuMeshes_[meshIndex].upload(scene_->meshes[meshIndex],
+                                         bake ? item.world : mat4(1.0f));
+            uploaded[meshIndex] = true;
+        }
+        transformBaked_[meshIndex] = bake;
+        if (bake) {
+            item.baked = true;
+            item.world = mat4(1.0f);
+            item.normalMatrix = mat3(1.0f);
+        }
+    }
+
+    std::size_t geometryBytes = 0;
+    std::size_t batchedMeshes = 0;
+    for (const Batch& batch : batches_) {
+        geometryBytes += batch.mesh.byteSize();
+        batchedMeshes += batch.items.size();
+    }
+    for (const GpuMesh& mesh : gpuMeshes_) geometryBytes += mesh.byteSize();
+
+    std::size_t textureBytes = 0;
+    for (const GpuTexture& texture : gpuTextures_) textureBytes += texture.byteSize();
+
+    stats_.gpuBytes = geometryBytes + textureBytes;
+    stats_.gpuUploadSeconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+
+    log::info("uploaded {} meshes ({} merged into {} batches) and {} textures, {:.1f} MB in {:.3f}s",
+              drawList_.size(), batchedMeshes, batches_.size(), gpuTextures_.size(),
+              static_cast<double>(stats_.gpuBytes) / (1024.0 * 1024.0), stats_.gpuUploadSeconds);
+    TESSERA_GL_CHECK("OpenGLBackend::buildBatches");
+}
+
+void OpenGLBackend::drawItemGeometry(const DrawItem& item) {
+    if (item.batch >= 0) {
+        const GpuMesh& merged = batches_[static_cast<std::size_t>(item.batch)].mesh;
+        if (!merged.valid()) return;
+        merged.bind();
+        merged.drawRange(item.indexOffset, item.indexCount);
+    } else {
+        const GpuMesh& mesh = gpuMeshes_[static_cast<std::size_t>(item.meshIndex)];
+        if (!mesh.valid()) return;
+        mesh.draw();
+    }
+    ++stats_.drawCalls;
+}
+
+void OpenGLBackend::drawItemPoints(const DrawItem& item) {
+    if (item.batch >= 0) {
+        const GpuMesh& merged = batches_[static_cast<std::size_t>(item.batch)].mesh;
+        if (!merged.valid()) return;
+        merged.bind();
+        merged.drawPointsRange(item.vertexOffset, item.vertexCount);
+    } else {
+        const GpuMesh& mesh = gpuMeshes_[static_cast<std::size_t>(item.meshIndex)];
+        if (!mesh.valid()) return;
+        mesh.drawPoints();
+    }
+    ++stats_.drawCalls;
+}
+
+void OpenGLBackend::drawBatch(const Batch& batch) {
+    batch.mesh.bind();
+
+    // Consecutive visible meshes share one draw call. A fully visible batch is
+    // therefore a single call no matter how many meshes went into it, and the
+    // worst case (alternating visibility) degrades gracefully to one per mesh.
+    GLsizei runOffset = 0;
+    GLsizei runCount = 0;
+
+    const auto submit = [&]() {
+        if (runCount == 0) return;
+        batch.mesh.drawRange(runOffset, runCount);
+        ++stats_.drawCalls;
+        stats_.trianglesDrawn += static_cast<std::size_t>(runCount) / 3;
+        runCount = 0;
+    };
+
+    for (int itemIndex : batch.items) {
+        const DrawItem& item = drawList_[static_cast<std::size_t>(itemIndex)];
+        const bool visible = !item.culled && meshVisible(item.meshIndex);
+        if (!visible) {
+            submit();
+            continue;
+        }
+        if (runCount == 0) runOffset = item.indexOffset;
+        runCount += item.indexCount;
+    }
+    submit();
 }
 
 void OpenGLBackend::updateDrawList(const Camera& camera, int width, int height) {
@@ -456,8 +623,36 @@ void OpenGLBackend::drawMeshes(const Camera& camera, const RenderSettings& setti
     const GLint normalMatrixLocation = meshShader_.locationOf("uNormalMatrix");
     bool identityBound = false;
 
+    static const scene::Material kDefaultMaterial;
+    const auto materialAt = [&](int index) -> const scene::Material& {
+        return (index >= 0 && index < static_cast<int>(scene_->materials.size()))
+                   ? scene_->materials[static_cast<std::size_t>(index)]
+                   : kDefaultMaterial;
+    };
+
+    // Merged batches carry only opaque geometry, so they belong to that pass.
+    // Each costs one material bind and, when nothing in it is hidden or culled,
+    // a single draw call regardless of how many meshes went in.
+    if (!blendedPass) {
+        for (const Batch& batch : batches_) {
+            if (batch.material != boundMaterial_) {
+                bindMaterial(materialAt(batch.material), settings);
+                boundMaterial_ = batch.material;
+            }
+            if (!identityBound) {
+                const mat4 identityModel(1.0f);
+                const mat3 identityNormal(1.0f);
+                glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(identityModel));
+                glUniformMatrix3fv(normalMatrixLocation, 1, GL_FALSE, glm::value_ptr(identityNormal));
+                identityBound = true;
+            }
+            drawBatch(batch);
+        }
+    }
+
     for (const DrawItem& item : drawList_) {
-        if (item.blended != blendedPass || item.culled) continue;
+        if (item.blended != blendedPass || item.culled || item.batch >= 0) continue;
+        if (!meshVisible(item.meshIndex)) continue;
 
         const GpuMesh& gpuMesh = gpuMeshes_[static_cast<std::size_t>(item.meshIndex)];
         if (!gpuMesh.valid()) continue;
@@ -465,12 +660,7 @@ void OpenGLBackend::drawMeshes(const Camera& camera, const RenderSettings& setti
         // Sorting put equal materials next to each other, so this skips almost
         // every material bind on a typical scene.
         if (item.material != boundMaterial_) {
-            static const scene::Material kDefaultMaterial;
-            const scene::Material& material =
-                (item.material >= 0 && item.material < static_cast<int>(scene_->materials.size()))
-                    ? scene_->materials[static_cast<std::size_t>(item.material)]
-                    : kDefaultMaterial;
-            bindMaterial(material, settings);
+            bindMaterial(materialAt(item.material), settings);
             boundMaterial_ = item.material;
         }
 
@@ -554,12 +744,9 @@ void OpenGLBackend::drawOverlays(const RenderSettings& settings, const mat4& vie
         lineShader_.set("uDepthBias", 1e-4f);
         glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
         for (const DrawItem& item : drawList_) {
-            if (item.culled) continue;
-            const GpuMesh& gpuMesh = gpuMeshes_[static_cast<std::size_t>(item.meshIndex)];
-            if (!gpuMesh.valid()) continue;
+            if (item.culled || !meshVisible(item.meshIndex)) continue;
             lineShader_.set("uModel", item.world);
-            gpuMesh.draw();
-            ++stats_.drawCalls;
+            drawItemGeometry(item);
         }
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
     }
@@ -571,11 +758,8 @@ void OpenGLBackend::drawOverlays(const RenderSettings& settings, const mat4& vie
         glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
         for (const DrawItem& item : drawList_) {
             if (item.meshIndex != selectedMesh_) continue;
-            const GpuMesh& gpuMesh = gpuMeshes_[static_cast<std::size_t>(item.meshIndex)];
-            if (!gpuMesh.valid()) continue;
             lineShader_.set("uModel", item.world);
-            gpuMesh.draw();
-            ++stats_.drawCalls;
+            drawItemGeometry(item);
         }
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
     }
@@ -587,6 +771,7 @@ void OpenGLBackend::drawOverlays(const RenderSettings& settings, const mat4& vie
         glBindVertexArray(boxVao_);
         for (const DrawItem& item : drawList_) {
             if (item.culled || !item.worldBounds.valid()) continue;
+            if (!meshVisible(item.meshIndex)) continue;
             // Uses the precomputed world-space box, not the object-space one
             // combined with item.world: a mesh whose transform was baked into
             // its vertex buffer carries an identity matrix here, and pairing
@@ -629,13 +814,10 @@ void OpenGLBackend::drawOverlays(const RenderSettings& settings, const mat4& vie
         normalsShader_.set("uColor", vec4(0.30f, 0.65f, 1.0f, 1.0f));
 
         for (const DrawItem& item : drawList_) {
-            if (item.culled) continue;
-            const GpuMesh& gpuMesh = gpuMeshes_[static_cast<std::size_t>(item.meshIndex)];
-            if (!gpuMesh.valid()) continue;
+            if (item.culled || !meshVisible(item.meshIndex)) continue;
             normalsShader_.set("uModel", item.world);
-            normalsShader_.set("uNormalMatrix", glm::transpose(glm::inverse(mat3(item.world))));
-            gpuMesh.drawPoints();
-            ++stats_.drawCalls;
+            normalsShader_.set("uNormalMatrix", item.normalMatrix);
+            drawItemPoints(item);
         }
     }
 

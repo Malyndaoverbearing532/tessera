@@ -72,9 +72,19 @@ an identity matrix. Any code combining an instance matrix with object-space data
 is therefore wrong: use the precomputed `worldBounds` instead. This bit the
 bounding-box overlay once already.
 
-**The draw list is cached.** It is rebuilt only when the scene or per-mesh
-visibility changes, not per frame. If you add state that affects what gets
-drawn, set `drawListDirty_`.
+**The draw list is cached, and batches are built from it.** The list is rebuilt
+only when the scene changes, not per frame and not when visibility changes. If
+you add state that affects *which meshes exist*, set `drawListDirty_`; if it
+only affects whether one is drawn, do not, or you will rebuild GPU buffers for
+a checkbox.
+
+**Opaque meshes sharing a material are merged into one buffer.** They are
+concatenated in world space, so a batch draws with an identity model matrix and
+no per-mesh uniforms at all. Each mesh keeps an index range inside the batch,
+which is how hiding, culling and selection still address one mesh: consecutive
+visible ranges are coalesced, so a fully visible batch costs a single draw call
+and the worst case degrades to one per mesh. Meshes that are blended, non
+triangular, or instanced at several nodes keep their own buffer.
 
 **Picking uses CPU-side scene data, not GPU state.** `tools::Picker` builds a
 BVH per mesh lazily, on first click, so opening a large model stays fast and only

@@ -96,14 +96,27 @@ experiment you actually want.
 Reference machine: Apple M1 Pro, macOS 26, OpenGL 4.1 via the Metal driver.
 Release build, 1280x800, median of three interleaved runs.
 
-| Commit | `many.obj` | `heavy.stl` |
-| --- | --- | --- |
-| Before the draw-path work | 17.5 ms (57 fps) | 2.9 ms (345 fps) |
-| After the draw-path work | 7.9 ms (127 fps) | 2.9 ms (345 fps) |
+All three builds measured together in one session, interleaved, which is the
+only comparison worth trusting:
 
-The heavy scene is unchanged, which is the expected and desired outcome: it was
-GPU-bound before and is GPU-bound now. Nothing done to the CPU side could help
-it, and a change there would have meant something had gone wrong.
+| Version | `many.obj` | Draw calls | `heavy.stl` |
+| --- | --- | --- | --- |
+| 0.1.0 | 17.34 ms (58 fps) | 4002 | 2.9 ms (345 fps) |
+| 0.2.0, draw-path work | 6.41 ms (156 fps) | 4002 | 2.9 ms (345 fps) |
+| 0.3.0, mesh batching | **1.32 ms (757 fps)** | **10** | 2.9 ms (345 fps) |
+
+That is **13.1x** end to end on the draw-call-bound scene.
+
+The heavy scene is unchanged throughout, which is the expected and desired
+outcome: it was GPU-bound at the start and is GPU-bound now. Nothing done to the
+CPU side could help it, and a change there would have meant something had gone
+wrong.
+
+Note that 0.2.0 measures 6.4 ms here against the 7.9 ms recorded in its own
+release notes. Both are honest readings of the same binary taken on different
+days, and the gap is exactly the cross-session variance described above. It is
+the reason this table was re-measured as a set rather than assembled from
+numbers collected over time.
 
 ## What each change was worth
 
@@ -116,6 +129,7 @@ Measured one at a time, in the order they were applied, on `many.obj`.
 | Group draws by material, skip redundant binds | 11.55 ms | 32% |
 | Cached draw list, precomputed bounds, frustum culling | 11.18 ms | 3%, **within noise** |
 | World transforms baked into vertex buffers | 6.97 ms | 38% |
+| Meshes sharing a material merged into one buffer | 1.32 ms | **79%** |
 
 Two of those five are inside the noise floor and are honestly not demonstrated
 wins on this benchmark. They were kept anyway, for reasons that are about
@@ -136,15 +150,26 @@ per-draw matrix uniforms dropped the frame to 7.29 ms, proving they alone cost
 
 ## Known headroom
 
-The draw path still issues one call per mesh, and this platform's OpenGL costs
-roughly 1.7 microseconds per bind-and-submit pair. On `many.obj` that is most of
-the remaining 7 ms.
+Very little remains on this benchmark. Rendering the same geometry as a single
+mesh with a single material, the theoretical floor, measures 1.04 ms; batching
+reaches 1.32 ms. The 0.28 ms gap is eight material binds, ten draw calls and the
+per-frame frustum test over four thousand items.
 
-The next real step is merging meshes that share a material into single buffers
-with per-mesh index ranges, taking 4002 draws down to about 8. It touches
-selection, per-mesh visibility and culling granularity, so it deserves to be
-done deliberately rather than bolted on.
+More usefully, most of that 1.04 ms floor is not geometry at all. Turning the
+grid off drops the single-mesh scene to 1.00 ms, and removing the background too
+changes nothing measurable, so what is left is fixed per-frame cost: the
+fullscreen passes and the buffer swap.
 
-Worth keeping in perspective: 4000 separate meshes is a deliberate worst case. A
-typical glTF or FBX model has tens to hundreds of meshes and is already
-comfortably under a millisecond.
+The inverse is worth noting as a diagnostic. Before batching, turning the grid
+off changed nothing at all (8.17 against 8.24 ms, inside noise), because a
+fullscreen pass is free when you are draw-call bound. That asymmetry is a quick
+way to tell which side of the fence a scene sits on.
+
+If the draw path is pushed further, the candidates in order are the per-frame
+cull loop (4000 bounds tests, currently trivial but linear in mesh count) and
+merging across materials with a texture array or bindless textures. Neither is
+worth doing without a scene that demonstrates the need.
+
+Worth keeping in perspective throughout: 4000 separate meshes is a deliberate
+worst case. A typical glTF or FBX model has tens to hundreds of meshes and was
+already comfortably under a millisecond before any of this work.
