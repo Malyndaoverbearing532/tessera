@@ -11,7 +11,7 @@ doubles as a format converter and a headless thumbnailer.
 [![platform](https://img.shields.io/badge/platform-macOS%2013.3%2B-lightgrey)](#platform-support)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![language](https://img.shields.io/badge/C%2B%2B-20-00599C)](#building-from-source)
-[![backend](https://img.shields.io/badge/render-OpenGL%203.3-5586A4)](#render-backends)
+[![backend](https://img.shields.io/badge/render-OpenGL%203.3-5586A4)](docs/BACKENDS.md)
 
 <img src="docs/images/shading-pbr.png" width="49%" alt="Vertex-coloured mesh under PBR shading">
 <img src="docs/images/textures.png" width="49%" alt="Textured model with the ground grid">
@@ -32,12 +32,8 @@ doubles as a format converter and a headless thumbnailer.
 - [Formats](#formats)
 - [Controls](#controls)
 - [Building from source](#building-from-source)
-- [Tests](#tests)
-- [Architecture](#architecture)
-- [Adding a format](#adding-a-format)
-- [Render backends](#render-backends)
 - [Platform support](#platform-support)
-- [Things worth knowing](#things-worth-knowing)
+- [Documentation](#documentation)
 - [Contributing](#contributing)
 
 ## Why it exists
@@ -174,21 +170,16 @@ cmake --build --preset macos
 | --- | --- |
 | `macos` | Release build against system/Homebrew dependencies, fastest to build |
 | `macos-debug` | Same, with debug info |
-| `macos-metal` | Adds the Metal backend (device detection only, see below) |
+| `macos-metal` | Adds the [Metal backend](docs/BACKENDS.md) (device detection only) |
 | `macos-universal` | arm64 + x86_64, all dependencies from source |
 | `macos-dmg` | Universal, bundled as `Tessera.app` in a `.dmg` |
 
 ### Producing a `.dmg`
 
-```bash
-cmake --preset macos-dmg
-cmake --build --preset macos-dmg
-cd build/macos-dmg && cpack
-```
-
-The bundle is self-contained: `TESSERA_PREFER_BUNDLED_DEPS` compiles every
-dependency from a pinned revision, so nothing links against Homebrew. See
-[RELEASING.md](RELEASING.md) for the full release procedure.
+`cmake --preset macos-dmg`, build, then `cpack`. The bundle is self-contained,
+with every dependency compiled from a pinned revision so nothing links against
+Homebrew. [RELEASING.md](RELEASING.md) has the full procedure and the checks
+worth running before publishing.
 
 ### Tests
 
@@ -219,10 +210,9 @@ python3 benchmarks/make_scenes.py
 tessera benchmarks/scenes/many.obj --benchmark 300 -s 1280x800 -q
 ```
 
-[BENCHMARK.md](BENCHMARK.md) covers the methodology, the measured noise floor
-and what previous changes were actually worth. Read it before quoting a number:
-absolute timings belong to the machine that produced them, and anything under
-roughly 10% is indistinguishable from noise.
+[BENCHMARK.md](BENCHMARK.md) covers the methodology and what previous changes
+were worth. Read it before quoting a number: absolute timings belong to the
+machine that produced them, and anything under roughly 10% is noise.
 
 ### Options
 
@@ -246,99 +236,6 @@ up front and fails with a readable message rather than a template avalanche.
 | Clang | 16 |
 | GCC | 13 |
 | MSVC | 19.29 (VS 2019 16.10) |
-
-## Architecture
-
-```
-src/core      logging, math, AABB, ray/triangle intersection
-src/scene     Scene / Node / Mesh / Material / Image, the format-agnostic IR
-src/io        IImporter + registry, native OBJ/STL/PLY, Assimp, exporters
-src/gfx       IRenderBackend + one directory per graphics API
-src/camera    orbit camera with Blender-style bindings
-src/tools     lazily-built BVH for picking and measurement
-src/ui        Dear ImGui panels
-src/app       window, input, CLI, headless modes
-```
-
-Two seams carry the design:
-
-**`scene::Scene`** is plain data: meshes, materials, images, a node hierarchy.
-Importers produce it, everything else consumes it. It is the reason a new format
-touches nothing but its own file.
-
-**`gfx::IRenderBackend`** is the rendering contract. Importers, the scene, the
-camera and picking sit above it and never mention a graphics API, so a new
-backend is a directory and a registry line.
-
-Dependencies flow one way: `app → ui → gfx → scene ← io → core`. Nothing in
-`scene` or `io` knows a renderer exists.
-
-## Adding a format
-
-Implement `io::IImporter`:
-
-```cpp
-class MyImporter final : public IImporter {
-public:
-    std::string name() const override { return "myfmt"; }
-
-    std::vector<FormatInfo> formats() const override {
-        return {{"myfmt", "My Format"}};
-    }
-
-    // Native readers use 100; the general-purpose fallback uses 0.
-    int priority() const override { return 100; }
-
-    bool load(const std::filesystem::path& path, const ImportOptions& options,
-              scene::Scene& out, std::string& error) override {
-        // Fill out.meshes / out.materials / out.nodes.
-        // The caller runs Scene::finalize(), so missing normals, tangents,
-        // bounds and statistics are handled for you.
-        return true;
-    }
-};
-```
-
-Register it in `registerBuiltinImporters()` and add the file to
-`src/CMakeLists.txt`. That is the whole procedure. The UI, the file browser
-filter, `--formats` and the renderer all pick it up automatically.
-
-Exporters work the same way through `io::IExporter`.
-
-## Render backends
-
-```bash
-tessera --list-backends
-tessera model.glb --backend opengl
-```
-
-| Backend | State |
-| --- | --- |
-| `opengl` | **Complete.** OpenGL 3.3 core |
-| `vulkan` | Device detection only, no renderer |
-| `metal` | Device detection only, no renderer |
-| `optix` | Device detection only, no renderer |
-| `cuda` | Device detection only, no renderer |
-
-The four unfinished ones inherit `gfx::UnimplementedBackend`. They report the
-hardware they actually find and refuse at `initialize()` with a message saying
-why, rather than pretending. `--list-backends` distinguishes *not compiled in*
-from *compiled in but unusable here*.
-
-If you want to finish one, override `initialize`, `render`, `present` and
-`renderToImage`. Notes:
-
-- **Metal does not require Xcode.** The frameworks ship with macOS and the
-  backend compiles with Command Line Tools alone. Only the offline `metal`
-  shader compiler is Xcode-only, so build pipelines with
-  `newLibraryWithSource:` and compile MSL at runtime.
-- **Vulkan** needs the LunarG SDK, and runs through MoltenVK on macOS.
-- **CUDA and OptiX are NVIDIA-only, so Linux or Windows only.** Apple has
-  shipped no CUDA driver since macOS 10.13, so CMake disables both on Apple
-  platforms rather than letting them fail at runtime. OptiX also needs its SDK,
-  which is behind NVIDIA's developer login, so point `TESSERA_OPTIX_ROOT` at it.
-  Being a ray tracer, that backend would be a progressive path tracer, not a
-  port of the OpenGL one.
 
 ## Platform support
 
@@ -369,32 +266,18 @@ Worth stating plainly:
 So: treat Linux and Windows as "compiles and the logic works", not as
 supported. If you run it on either, reports are genuinely welcome.
 
-## Things worth knowing
+## Documentation
 
-A few decisions that look arbitrary and are not:
+The README covers using Tessera. The rest lives in `docs/`, so that this page
+stays readable for someone who just wants to open a model.
 
-**The macOS deployment target is 13.3.** libc++ keeps floating-point
-`std::to_chars` in the shared library rather than the headers, annotated for
-availability. Every `std::format("{:.3f}", x)` calls it, so a lower target fails
-to compile the whole project.
-
-**The ASCII parsers have their own float scanner.** Floating-point
-`std::from_chars` is gated at macOS 26 in libc++. The replacement in
-`io/FileUtil.cpp` is also faster than `strtod` and, unlike it, locale
-independent: a `,` decimal separator will not silently corrupt your meshes.
-
-**Assimp's bundled zlib is avoided where a system one exists.** The vendored
-copy tests `defined(TARGET_OS_MAC)` as a classic Mac OS marker; modern SDKs
-always define it, so it does `#define fdopen(fd,mode) NULL` and poisons
-`<stdio.h>` for everything compiled after it.
-
-**Point clouds shade toward the camera.** They carry no normals, and PBR
-lighting on a zero normal renders black.
-
-**glad's own CMake is not used.** It declares
-`cmake_minimum_required(VERSION 3.0)`, which CMake 4 refuses. Driving the
-generator directly also allows `--reproducible`, so the loader is built from a
-pinned Khronos spec instead of whatever is on the registry today.
+| Document | What is in it |
+| --- | --- |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | The seams the design rests on, the invariants to respect, and why several odd-looking decisions are the way they are |
+| [FORMATS.md](docs/FORMATS.md) | Writing an importer or exporter, and the mistakes that catch people out |
+| [BACKENDS.md](docs/BACKENDS.md) | The `IRenderBackend` contract, the state of each backend, and what finishing one actually involves |
+| [BENCHMARK.md](BENCHMARK.md) | Measuring the renderer, the noise floor, and past results |
+| [RELEASING.md](RELEASING.md) | Cutting a release, and signing and notarisation |
 
 ## Contributing
 
@@ -406,9 +289,11 @@ Issues and pull requests are welcome. Things that would genuinely help:
   contribution right now, and there is an
   [issue template](../../issues/new?template=platform_bug.yml) that asks for
   exactly the details needed to act on it.
-- **Finish a render backend.** The seam is in place and the OpenGL
-  implementation is a working reference.
+- **Finish a render backend.** The seam is in place and OpenGL is a working
+  reference; [BACKENDS.md](docs/BACKENDS.md) has the contract and the costs
+  that are easy to underestimate.
 - **New format readers**, especially ones Assimp handles poorly.
+  [FORMATS.md](docs/FORMATS.md) is a complete walkthrough.
 - **Test models** that break the importers. Malformed files are welcome.
 
 Match the surrounding style: descriptive names, comments that explain *why*
