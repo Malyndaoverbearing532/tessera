@@ -48,10 +48,10 @@ option(TESSERA_PREFER_BUNDLED_DEPS "Always build dependencies from source"      
 option(TESSERA_MACOS_BUNDLE "Build tessera as a macOS .app bundle"                         OFF)
 
 if(NOT APPLE)
-    message(WARNING
-        "Tessera is only tested on macOS. The Linux and Windows build paths are "
-        "written but have never been compiled, so expect to fix things. Reports "
-        "and patches welcome.")
+    message(STATUS
+        "Note: this platform builds and passes the test suite in CI, but only on "
+        "a headless virtual machine with no GPU. Nobody has yet run Tessera on "
+        "real Linux or Windows hardware. Reports welcome.")
 endif()
 
 include(Platform)

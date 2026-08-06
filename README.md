@@ -7,6 +7,7 @@
 Opens about seventy formats, renders them with physically-based shading, and
 doubles as a format converter and a headless thumbnailer.
 
+[![CI](https://github.com/sarp64/tessera/actions/workflows/ci.yml/badge.svg)](https://github.com/sarp64/tessera/actions/workflows/ci.yml)
 [![platform](https://img.shields.io/badge/platform-macOS%2013.3%2B-lightgrey)](#platform-support)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![language](https://img.shields.io/badge/C%2B%2B-20-00599C)](#building-from-source)
@@ -306,19 +307,32 @@ If you want to finish one, override `initialize`, `render`, `present` and
 
 ## Platform support
 
-**macOS is the only platform this has been built and run on.** That is a
-statement about testing, not intent.
+**macOS is the only platform the app has actually been used on.** Linux and
+Windows build and pass the test suite in CI, but that happens on a headless
+virtual machine with no GPU. It proves the code compiles and the logic is
+correct; it does not prove the application behaves properly on a real desktop
+with real drivers.
 
-| Platform | Status |
-| --- | --- |
-| macOS 13.3+ (Apple silicon and Intel) | Tested: builds, runs, ships |
-| Linux | Written, never compiled |
-| Windows | Written, never compiled |
+| Platform | Builds | Tests | Used on real hardware |
+| --- | --- | --- | --- |
+| macOS 13.3+ (Apple silicon and Intel) | yes | 15/15 | yes |
+| Linux | in CI | 15/15, rendering via Xvfb and llvmpipe | not yet |
+| Windows | in CI | 13/13 headless; rendering not exercised | not yet |
 
-The Linux and Windows paths are real code written against their actual
-constraints (GLVND, X11 and Wayland, `/utf-8`, `/bigobj`, `NOMINMAX`,
-`opengl32`), but until CI compiles them, treat them as untested. CMake prints a
-warning saying so. Reports and patches welcome.
+Worth stating plainly:
+
+- **Windows CI never renders anything.** GitHub's runners offer only OpenGL
+  1.1, below the 3.3 core requirement, so the graphics path is compiled there
+  but never executed.
+- **No CI machine has a GPU.** Linux rendering is verified through Mesa's
+  software rasteriser, which exercises the shaders and the pipeline but not any
+  real driver.
+- **Nothing interactive is covered anywhere but macOS.** Window management,
+  high-DPI behaviour, input handling and the desktop file-open integration are
+  untested off macOS.
+
+So: treat Linux and Windows as "compiles and the logic works", not as
+supported. If you run it on either, reports are genuinely welcome.
 
 ## Things worth knowing
 
@@ -351,8 +365,10 @@ pinned Khronos spec instead of whatever is on the registry today.
 
 Issues and pull requests are welcome. Things that would genuinely help:
 
-- **Build it on Linux or Windows** and report what breaks. This is the single
-  most useful contribution right now.
+- **Run it on real Linux or Windows hardware** and report what breaks. CI proves
+  it compiles and the logic holds on a virtual machine; it says nothing about
+  actual drivers, window managers or GPUs. This is the single most useful
+  contribution right now.
 - **Finish a render backend.** The seam is in place and the OpenGL
   implementation is a working reference.
 - **New format readers**, especially ones Assimp handles poorly.
