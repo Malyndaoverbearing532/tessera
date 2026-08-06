@@ -98,6 +98,25 @@ public:
     /// present time.
     virtual void present(GLFWwindow* window) = 0;
 
+    /// Whether the backend can still draw.
+    ///
+    /// render() and present() return void deliberately: a frame that fails to
+    /// draw is the backend's problem to absorb, and a caller cannot do anything
+    /// useful with a per-frame error code. Losing the device is different. It
+    /// is permanent, every later frame fails identically, and continuing to
+    /// spin producing nothing is the worst possible behaviour because the user
+    /// sees a frozen window with no explanation.
+    ///
+    /// So: absorb frame-level failures silently, and latch this to false when
+    /// the device is gone. Once false it stays false. The application checks
+    /// after each frame and exits with the reason rather than looping.
+    [[nodiscard]] virtual bool operational() const { return true; }
+
+    /// Why drawing stopped. Meaningful once operational() is false, and should
+    /// name the actual cause, for example "device lost" or "out of device
+    /// memory", not "render failed".
+    [[nodiscard]] virtual std::string failureReason() const { return {}; }
+
     /// Renders offscreen into `rgba`: tightly packed RGBA8, **bottom row
     /// first**, matching glReadPixels. Backends whose images come out top-down
     /// must flip before returning, or every thumbnail is upside down.

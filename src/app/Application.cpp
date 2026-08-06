@@ -516,6 +516,7 @@ int Application::run(const Options& options) {
 
     if (!options.input.empty()) loadFile(options.input);
 
+    int exitCode = 0;
     double previousTime = glfwGetTime();
     while (!glfwWindowShouldClose(window_)) {
         glfwPollEvents();
@@ -569,6 +570,17 @@ int Application::run(const Options& options) {
 
         ui_.endFrame();
         renderer_->present(window_);
+
+        // A lost device is permanent: every later frame would fail the same
+        // way. Spinning on it would leave the user staring at a frozen window
+        // with nothing explaining why, so stop and say what happened. The UI
+        // cannot report it, because the UI draws through the backend that just
+        // died.
+        if (!renderer_->operational()) {
+            log::error("rendering stopped: {}", renderer_->failureReason());
+            exitCode = 1;
+            break;
+        }
     }
 
     ui_.shutdown();
@@ -577,7 +589,7 @@ int Application::run(const Options& options) {
     // GL object outlives the context it belongs to.
     renderer_.reset();
     destroyWindow();
-    return 0;
+    return exitCode;
 }
 
 // ---------------------------------------------------------------------------

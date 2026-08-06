@@ -107,6 +107,51 @@ Three further requirements:
   returning.** This is the single easiest thing to get wrong here, and the
   symptom is an upside-down thumbnail that no test currently catches.
 
+### Errors during a frame
+
+`render()` and `present()` return void. That is a decision, not an oversight,
+and it rests on separating three kinds of failure that are genuinely different.
+
+**Expected and self-healing.** A swapchain that has gone out of date or
+suboptimal. Rebuild internally, drop the frame, say nothing. Covered above.
+
+**Transient and unexplained.** Metal's `nextDrawable` returning nil, a surface
+briefly lost, a zero-sized window because the user minimised it. Skip the frame
+and carry on. There is nothing the application could usefully do with this
+information, and a return code would only invite callers to invent a response
+they do not have.
+
+Two rules for this tier. **Do not log per frame**: a condition that persists at
+sixty hertz produces thousands of identical lines and buries whatever actually
+matters, so rate-limit or stay quiet. And **a zero or tiny target size is not an
+error**; the window is minimised, and skipping is the correct handling.
+
+**Permanent.** The device is gone: `VK_ERROR_DEVICE_LOST` after a GPU reset or a
+driver update, out of device memory, a CUDA context poisoned by a sticky error.
+Every subsequent frame will fail identically.
+
+This tier must reach the application, which is what `operational()` and
+`failureReason()` are for. Latch `operational()` to false and leave it false.
+The main loop checks after each frame, logs the reason and exits non-zero.
+
+Continuing to spin is the one genuinely bad option here, because the user is
+left looking at a frozen window with nothing explaining it, and the bug report
+that follows says only "it stopped working". Note also that the interface
+cannot show the failure in the UI: Dear ImGui draws through the same backend
+that just died, so stderr and an exit code are all that is left.
+
+Recovering from device loss by rebuilding the device and all its resources is
+possible, and is deliberately out of scope. A viewer holds no unsaved work, so
+exiting with a clear message costs the user a relaunch and costs the codebase
+nothing. Revisit only if it turns out to happen often.
+
+The OpenGL backend never sets this. Detecting a reset needs `GL_KHR_robustness`,
+which is not in 3.3 core, and in practice a lost GL context on the desktop takes
+the process with it anyway.
+
+Note that `renderToImage()` is unaffected by all of this: it already returns
+`bool`, so any failure including device loss surfaces to its caller directly.
+
 ### Reporting why a backend will not run
 
 Three states are genuinely different and must not be collapsed:
