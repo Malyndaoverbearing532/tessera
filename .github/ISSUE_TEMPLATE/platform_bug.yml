@@ -1,0 +1,125 @@
+name: Platform-specific bug
+description: Report a rendering, driver, windowing or UI bug on a specific OS
+title: "[Platform] "
+labels: ["bug", "platform-specific"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting.
+
+        Some context that may save you time: **Tessera has only ever been used
+        on macOS.** Linux and Windows compile and pass the test suite in CI, but
+        that runs on a headless virtual machine with no GPU. Nothing has been
+        verified against a real driver, a real window manager or a real
+        graphics card.
+
+        So if you are on Linux or Windows and something is broken, that is
+        expected rather than surprising, and your report is the most useful
+        thing anyone can contribute right now.
+
+  - type: input
+    id: version
+    attributes:
+      label: Tessera version
+      description: Output of `tessera --version`, or the commit hash if you built from source.
+      placeholder: "tessera 0.1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you get it?
+      options:
+        - Built from source
+        - Downloaded the .dmg from Releases
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "Ubuntu 24.04, Windows 11 23H2, macOS 15.2"
+    validations:
+      required: true
+
+  - type: input
+    id: session
+    attributes:
+      label: Desktop environment / window manager
+      description: Linux users, please say whether you are on Wayland or X11. Windows and macOS users can write N/A.
+      placeholder: "Wayland, KDE Plasma 6"
+    validations:
+      required: true
+
+  - type: input
+    id: gpu
+    attributes:
+      label: Graphics card
+      placeholder: "NVIDIA RTX 4070, AMD RX 7800 XT, Intel Arc A770, Apple M3"
+    validations:
+      required: true
+
+  - type: input
+    id: driver
+    attributes:
+      label: Driver version
+      description: "Linux: `glxinfo | grep OpenGL` or the Mesa version. Windows: the NVIDIA/AMD/Intel driver version."
+      placeholder: "NVIDIA 560.35.03, Mesa 24.2.8"
+    validations:
+      required: true
+
+  - type: textarea
+    id: backends
+    attributes:
+      label: Output of `tessera --list-backends`
+      description: This reports which backends the build has and what hardware each one detects. Pasted as-is is fine.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What goes wrong?
+      description: What you saw, and what you expected instead. Screenshots help a great deal for anything visual.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: |
+        The exact command, and what you opened. Tessera reads about seventy
+        formats and the bug is often specific to one of them, so please say
+        which. A small file that triggers it is the single most useful thing
+        you can attach.
+      placeholder: |
+        1. tessera model.glb
+        2. Press W to toggle wireframe
+        3. The window goes black
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output
+      description: Run with `-v` for verbose logging and paste what it prints. Errors about shaders or contexts are especially useful.
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I ran `tessera --list-backends` and pasted the output above
+          required: true
+        - label: I checked that no existing issue already covers this
+          required: true

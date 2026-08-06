@@ -209,6 +209,21 @@ graphics context:
 project: `tessera_core` links without OpenGL, so the whole import and export
 path is testable headless. `ctest -L render` runs just the graphics tests.
 
+### Benchmarks
+
+There is a built-in benchmark mode, so renderer changes get measured rather than
+argued about:
+
+```bash
+python3 benchmarks/make_scenes.py
+tessera benchmarks/scenes/many.obj --benchmark 300 -s 1280x800 -q
+```
+
+[BENCHMARK.md](BENCHMARK.md) covers the methodology, the measured noise floor
+and what previous changes were actually worth. Read it before quoting a number:
+absolute timings belong to the machine that produced them, and anything under
+roughly 10% is indistinguishable from noise.
+
 ### Options
 
 | Option | Default | Meaning |
@@ -388,7 +403,9 @@ Issues and pull requests are welcome. Things that would genuinely help:
 - **Run it on real Linux or Windows hardware** and report what breaks. CI proves
   it compiles and the logic holds on a virtual machine; it says nothing about
   actual drivers, window managers or GPUs. This is the single most useful
-  contribution right now.
+  contribution right now, and there is an
+  [issue template](../../issues/new?template=platform_bug.yml) that asks for
+  exactly the details needed to act on it.
 - **Finish a render backend.** The seam is in place and the OpenGL
   implementation is a working reference.
 - **New format readers**, especially ones Assimp handles poorly.

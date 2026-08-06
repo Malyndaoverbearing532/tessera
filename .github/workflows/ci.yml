@@ -18,12 +18,14 @@ on:
       - 'docs/**'
       - 'LICENSE'
       - '.gitignore'
+      - '.github/ISSUE_TEMPLATE/**'
   pull_request:
     paths-ignore:
       - '**.md'
       - 'docs/**'
       - 'LICENSE'
       - '.gitignore'
+      - '.github/ISSUE_TEMPLATE/**'
   workflow_dispatch:
 
 # A newer push supersedes an in-flight run for the same ref.
