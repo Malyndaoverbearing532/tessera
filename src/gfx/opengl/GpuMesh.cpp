@@ -46,9 +46,24 @@ void GpuMesh::destroy() {
     primitiveCount_ = 0;
 }
 
-void GpuMesh::upload(const scene::Mesh& mesh) {
+void GpuMesh::upload(const scene::Mesh& mesh, const mat4& bakeTransform) {
     destroy();
     if (mesh.vertices.empty()) return;
+
+    // Only copy the vertices when there is actually a transform to apply.
+    const bool bake = bakeTransform != mat4(1.0f);
+    std::vector<scene::Vertex> transformed;
+    if (bake) {
+        const mat3 normalMatrix = glm::transpose(glm::inverse(mat3(bakeTransform)));
+        transformed = mesh.vertices;
+        for (scene::Vertex& vertex : transformed) {
+            vertex.position = vec3(bakeTransform * vec4(vertex.position, 1.0f));
+            vertex.normal = glm::normalize(normalMatrix * vertex.normal);
+            vertex.tangent = vec4(glm::normalize(normalMatrix * vec3(vertex.tangent)),
+                                  vertex.tangent.w);
+        }
+    }
+    const std::vector<scene::Vertex>& vertices = bake ? transformed : mesh.vertices;
 
     switch (mesh.topology) {
         case scene::Topology::Triangles: mode_ = GL_TRIANGLES; break;
@@ -59,10 +74,10 @@ void GpuMesh::upload(const scene::Mesh& mesh) {
     glGenVertexArrays(1, &vao_);
     glBindVertexArray(vao_);
 
-    const std::size_t vertexBytes = mesh.vertices.size() * sizeof(scene::Vertex);
+    const std::size_t vertexBytes = vertices.size() * sizeof(scene::Vertex);
     glGenBuffers(1, &vbo_);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertexBytes), mesh.vertices.data(),
+    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertexBytes), vertices.data(),
                  GL_STATIC_DRAW);
 
     const auto stride = static_cast<GLsizei>(sizeof(scene::Vertex));
@@ -90,12 +105,12 @@ void GpuMesh::upload(const scene::Mesh& mesh) {
         elementCount_ = static_cast<GLsizei>(mesh.indices.size());
     } else {
         indexed_ = false;
-        elementCount_ = static_cast<GLsizei>(mesh.vertices.size());
+        elementCount_ = static_cast<GLsizei>(vertices.size());
     }
 
     glBindVertexArray(0);
 
-    vertexCount_ = static_cast<GLsizei>(mesh.vertices.size());
+    vertexCount_ = static_cast<GLsizei>(vertices.size());
     byteSize_ = vertexBytes + indexBytes;
     primitiveCount_ = mesh.primitiveCount();
 }

@@ -24,6 +24,10 @@ struct Options {
     /// Render backend key ("opengl", "vulkan", ...). Empty means "pick one".
     std::string backend;
 
+    /// Render this many frames offscreen and report timings, then exit. Zero
+    /// disables. Used to measure the renderer rather than guess at it.
+    int benchmarkFrames = 0;
+
     bool listFormats = false;
     bool listExportFormats = false;
     bool listBackends = false;
@@ -40,7 +44,9 @@ struct Options {
     bool valid = true;
     std::string error;
 
-    [[nodiscard]] bool headless() const { return !renderOutput.empty() || !convertOutput.empty(); }
+    [[nodiscard]] bool headless() const {
+        return !renderOutput.empty() || !convertOutput.empty() || benchmarkFrames > 0;
+    }
 };
 
 Options parseCommandLine(int argc, char** argv);

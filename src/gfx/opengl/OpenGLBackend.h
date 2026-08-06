@@ -52,16 +52,27 @@ public:
 private:
     struct DrawItem {
         int meshIndex = -1;
+        int material = -1;
         mat4 world{1.0f};
+        /// Precomputed here rather than in the draw loop; inverting a matrix
+        /// per mesh per frame is pure waste for a scene that is not moving.
+        mat3 normalMatrix{1.0f};
+        Aabb worldBounds;
         float viewDepth = 0.0f;
         bool blended = false;
+        bool baked = false;    /// transform already in the vertex buffer
+        bool culled = false;   /// recomputed every frame from the frustum
     };
 
     /// The pass itself, with no framebuffer binding of its own, so both the
     /// on-screen path and the offscreen capture can drive it.
     void renderScene(const Camera& camera, const RenderSettings& settings, int width, int height);
 
-    void buildDrawList(const Camera& camera);
+    /// Rebuilds the static half of the draw list: transforms, bounds and
+    /// material grouping. Only scene or visibility changes invalidate it.
+    void rebuildDrawList();
+    /// Per-frame work: frustum culling, and depth sorting the blended items.
+    void updateDrawList(const Camera& camera, int width, int height);
     void drawBackground(const RenderSettings& settings);
     void drawMeshes(const Camera& camera, const RenderSettings& settings, const mat4& viewProjection,
                     bool blendedPass);
@@ -75,7 +86,10 @@ private:
     std::vector<GpuMesh> gpuMeshes_;
     std::vector<GpuTexture> gpuTextures_;
     std::vector<bool> meshVisible_;
+    /// True where the world transform is already folded into the vertex buffer.
+    std::vector<bool> transformBaked_;
     std::vector<DrawItem> drawList_;
+    bool drawListDirty_ = true;
 
     Shader meshShader_;
     Shader lineShader_;
@@ -96,6 +110,11 @@ private:
 
     Aabb sceneBounds_;
     FrameStats stats_;
+
+    /// Redundant-state tracking for the draw loop. Reset at the start of every
+    /// pass, since another pass may have changed the binding behind our back.
+    int boundMaterial_ = -2;
+    int cullFaceEnabled_ = -1;  // -1 unknown, 0 disabled, 1 enabled
 
     int selectedMesh_ = -1;
     std::vector<vec3> measurePoints_;

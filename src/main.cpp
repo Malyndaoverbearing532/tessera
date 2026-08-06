@@ -42,6 +42,9 @@ int main(int argc, char** argv) {
     if (!options.renderOutput.empty()) {
         return tessera::app::Application::runHeadlessRender(options);
     }
+    if (options.benchmarkFrames > 0) {
+        return tessera::app::Application::runBenchmark(options);
+    }
 
     tessera::app::Application application;
     return application.run(options);

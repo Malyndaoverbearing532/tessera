@@ -28,6 +28,10 @@ public:
     [[nodiscard]] bool valid() const { return program_ != 0; }
     [[nodiscard]] GLuint id() const { return program_; }
 
+    /// Resolves a uniform location once so a hot loop can call glUniform*
+    /// directly instead of hashing a name per draw.
+    [[nodiscard]] GLint locationOf(std::string_view name) { return location(name); }
+
     void set(std::string_view name, int value);
     void set(std::string_view name, float value);
     void set(std::string_view name, const vec2& value);
@@ -40,8 +44,19 @@ private:
     GLint location(std::string_view name);
     void destroy();
 
+    /// Transparent hashing so a string_view can be looked up without first
+    /// materialising a std::string. Without it every uniform assignment
+    /// allocates, which at fifteen uniforms per draw call is tens of thousands
+    /// of allocations per frame on a scene with many meshes.
+    struct TransparentHash {
+        using is_transparent = void;
+        std::size_t operator()(std::string_view text) const noexcept {
+            return std::hash<std::string_view>{}(text);
+        }
+    };
+
     GLuint program_ = 0;
-    std::unordered_map<std::string, GLint> locations_;
+    std::unordered_map<std::string, GLint, TransparentHash, std::equal_to<>> locations_;
     std::string name_;
 };
 

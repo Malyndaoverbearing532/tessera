@@ -32,6 +32,10 @@ public:
     /// Renders a PNG using a hidden window, then exits.
     static int runHeadlessRender(const Options& options);
 
+    /// Renders repeatedly into a hidden window and reports frame timings.
+    /// Exists so renderer changes can be measured rather than guessed at.
+    static int runBenchmark(const Options& options);
+
 private:
     bool createWindow(const Options& options, const gfx::WindowRequirements& requirements,
                       std::string& error);

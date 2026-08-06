@@ -69,6 +69,50 @@ struct Aabb {
     }
 };
 
+/// The six clipping planes of a view-projection matrix, each stored as
+/// (normal.xyz, distance) and pointing inwards.
+struct Frustum {
+    vec4 planes[6];
+
+    /// Gribb and Hartmann's extraction: the planes fall straight out of sums
+    /// and differences of the matrix rows, with no inverse required.
+    void extract(const mat4& viewProjection) {
+        const mat4& m = viewProjection;
+        // glm is column-major, so m[column][row]; these gather the rows.
+        const vec4 row0(m[0][0], m[1][0], m[2][0], m[3][0]);
+        const vec4 row1(m[0][1], m[1][1], m[2][1], m[3][1]);
+        const vec4 row2(m[0][2], m[1][2], m[2][2], m[3][2]);
+        const vec4 row3(m[0][3], m[1][3], m[2][3], m[3][3]);
+
+        planes[0] = row3 + row0;  // left
+        planes[1] = row3 - row0;  // right
+        planes[2] = row3 + row1;  // bottom
+        planes[3] = row3 - row1;  // top
+        planes[4] = row3 + row2;  // near
+        planes[5] = row3 - row2;  // far
+
+        for (vec4& plane : planes) {
+            const float length = glm::length(vec3(plane));
+            if (length > 1e-12f) plane /= length;
+        }
+    }
+
+    /// Conservative test: rejects only boxes wholly outside a plane. Testing
+    /// the corner furthest along each normal is enough, and costs one dot
+    /// product per plane.
+    [[nodiscard]] bool intersects(const Aabb& box) const {
+        if (!box.valid()) return true;  // no bounds means never cull
+        for (const vec4& plane : planes) {
+            const vec3 normal(plane);
+            const vec3 furthest(normal.x >= 0.0f ? box.max.x : box.min.x,
+                                normal.y >= 0.0f ? box.max.y : box.min.y,
+                                normal.z >= 0.0f ? box.max.z : box.min.z);
+            if (glm::dot(normal, furthest) + plane.w < 0.0f) return false;
+        }
+        return true;
+    }
+};
+
 /// Möller-Trumbore. Returns the ray parameter, or a negative value on a miss.
 inline float intersectTriangle(const vec3& origin, const vec3& dir, const vec3& a, const vec3& b,
                                const vec3& c) {

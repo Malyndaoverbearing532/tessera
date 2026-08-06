@@ -127,10 +127,13 @@ bool Shader::build(std::string_view vertex, std::string_view fragment, std::stri
 void Shader::bind() const { glUseProgram(program_); }
 
 GLint Shader::location(std::string_view name) {
-    const std::string key(name);
-    if (const auto it = locations_.find(key); it != locations_.end()) return it->second;
+    // The lookup is the hot path and must not allocate; only a first-time miss
+    // pays for the string.
+    if (const auto it = locations_.find(name); it != locations_.end()) return it->second;
+
+    std::string key(name);
     const GLint value = glGetUniformLocation(program_, key.c_str());
-    locations_.emplace(key, value);
+    locations_.emplace(std::move(key), value);
     return value;
 }
 

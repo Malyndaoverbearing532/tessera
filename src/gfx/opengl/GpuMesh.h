@@ -16,7 +16,12 @@ public:
     GpuMesh(GpuMesh&& other) noexcept;
     GpuMesh& operator=(GpuMesh&& other) noexcept;
 
-    void upload(const scene::Mesh& mesh);
+    /// Uploads `mesh`, optionally baking a world transform into the vertex data.
+    ///
+    /// A viewer's scene does not move, so a mesh used by exactly one node can
+    /// have its transform folded in once here instead of being sent as two
+    /// uniform matrices on every draw of every frame.
+    void upload(const scene::Mesh& mesh, const mat4& bakeTransform = mat4(1.0f));
     void destroy();
 
     /// Draws with the mesh's own topology.

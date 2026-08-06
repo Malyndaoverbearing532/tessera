@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cmath>
 #include <format>
+#include <numeric>
 
 namespace tessera::app {
 namespace {
@@ -600,6 +601,110 @@ int Application::runConvert(const Options& options) {
         return 1;
     }
     return 0;
+}
+
+int Application::runBenchmark(const Options& options) {
+    io::registerBuiltinImporters();
+
+    scene::Scene scene;
+    std::string error;
+    if (!io::ImporterRegistry::instance().load(options.input, options.import, scene, error)) {
+        log::error("{}", error);
+        return 1;
+    }
+
+    const std::string backendKey =
+        options.backend.empty() ? gfx::BackendRegistry::instance().defaultKey() : options.backend;
+    gfx::BackendPtr renderer = gfx::BackendRegistry::instance().create(backendKey, error);
+    if (!renderer) {
+        log::error("{}", error);
+        return 1;
+    }
+
+    glfwSetErrorCallback(glfwErrorCallback);
+    if (!glfwInit()) {
+        log::error("could not initialise GLFW");
+        return 1;
+    }
+
+    applyWindowHints(renderer->windowRequirements(options.samples));
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    GLFWwindow* window = glfwCreateWindow(options.width, options.height, "tessera", nullptr, nullptr);
+    if (!window) {
+        log::error("could not create an offscreen rendering context");
+        glfwTerminate();
+        return 1;
+    }
+
+    int exitCode = 0;
+    if (!renderer->initialize(window, error)) {
+        log::error("renderer: {}", error);
+        exitCode = 1;
+    } else {
+        // Vsync would cap every measurement at the refresh rate and tell us
+        // nothing about the renderer.
+        glfwSwapInterval(0);
+        renderer->setScene(&scene);
+
+        Camera camera;
+        camera.setView(Camera::View::Isometric);
+        const float aspect =
+            static_cast<float>(options.width) / static_cast<float>(std::max(options.height, 1));
+        camera.frame(scene.bounds(), aspect);
+
+        const int frames = std::max(options.benchmarkFrames, 1);
+        // Discard the first frames: shader compilation, buffer residency and
+        // driver warm-up all land there and would skew the mean.
+        const int warmup = std::min(20, std::max(1, frames / 10));
+
+        std::vector<double> samples;
+        samples.reserve(static_cast<std::size_t>(frames));
+
+        for (int i = 0; i < warmup + frames; ++i) {
+            // Rotating the camera keeps the driver from caching a static frame
+            // and makes the numbers representative of actual interaction.
+            camera.orbit(0.01f, 0.0f);
+
+            const auto start = std::chrono::steady_clock::now();
+            renderer->render(camera, options.render, options.width, options.height);
+            renderer->present(window);
+            const auto end = std::chrono::steady_clock::now();
+
+            if (i >= warmup) {
+                samples.push_back(std::chrono::duration<double, std::milli>(end - start).count());
+            }
+        }
+
+        std::sort(samples.begin(), samples.end());
+        const double total = std::accumulate(samples.begin(), samples.end(), 0.0);
+        const double mean = total / static_cast<double>(samples.size());
+        const double median = samples[samples.size() / 2];
+        const double p95 = samples[static_cast<std::size_t>(
+            std::min<double>(static_cast<double>(samples.size()) - 1,
+                             static_cast<double>(samples.size()) * 0.95))];
+
+        const gfx::FrameStats& frameStats = renderer->stats();
+        std::printf(
+            "%-22s %s\n"
+            "  scene        %zu meshes, %zu triangles, %zu materials\n"
+            "  per frame    %d draw calls, %zu triangles submitted\n"
+            "  frames       %zu measured, %d discarded as warm-up, %dx%d\n"
+            "  mean         %8.3f ms   (%.1f fps)\n"
+            "  median       %8.3f ms   (%.1f fps)\n"
+            "  best         %8.3f ms\n"
+            "  95th pct     %8.3f ms\n",
+            "benchmark", options.input.filename().string().c_str(), scene.stats.meshCount,
+            scene.stats.triangleCount, scene.stats.materialCount, frameStats.drawCalls,
+            frameStats.trianglesDrawn, samples.size(), warmup, options.width, options.height,
+            mean, 1000.0 / mean, median, 1000.0 / median, samples.front(), p95);
+
+        renderer->shutdown();
+    }
+
+    renderer.reset();
+    glfwDestroyWindow(window);
+    glfwTerminate();
+    return exitCode;
 }
 
 int Application::runHeadlessRender(const Options& options) {

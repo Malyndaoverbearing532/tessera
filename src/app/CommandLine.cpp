@@ -122,6 +122,13 @@ Options parseCommandLine(int argc, char** argv) {
                 fail(std::string("expected WIDTHxHEIGHT, got: ").append(size));
                 return options;
             }
+        } else if (argument == "--benchmark") {
+            const std::string_view frames = value(argument);
+            if (!options.valid) return options;
+            if (!parseNumber(frames, options.benchmarkFrames)) {
+                fail(std::string("expected a frame count for --benchmark, got: ").append(frames));
+                return options;
+            }
         } else if (argument == "--samples") {
             const std::string_view samples = value(argument);
             if (!options.valid) return options;
@@ -203,6 +210,7 @@ Options:
                          (see --list-backends for what this build supports)
   -s, --size WxH         viewport / output size            (default 1280x800)
       --samples N        multisample count                 (default 4)
+      --benchmark N      render N frames offscreen, report timings, and exit
       --shading MODE     shaded, clay, albedo, normals, tangents, uv,
                          metallic, roughness, ao, vertexcolor
       --wireframe        overlay the wireframe

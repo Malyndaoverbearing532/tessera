@@ -3,6 +3,8 @@
 #include "core/Log.h"
 #include "gfx/opengl/Shaders.h"
 
+#include <glm/gtc/type_ptr.hpp>
+
 #include <GLFW/glfw3.h>
 
 #include <algorithm>
@@ -223,6 +225,7 @@ void OpenGLBackend::setScene(const scene::Scene* scene) {
     gpuTextures_.clear();
     meshVisible_.clear();
     drawList_.clear();
+    drawListDirty_ = true;
     selectedMesh_ = -1;
     measurePoints_.clear();
     scene_ = scene;
@@ -230,11 +233,28 @@ void OpenGLBackend::setScene(const scene::Scene* scene) {
 
     if (!scene) return;
 
-    gpuMeshes_.resize(scene->meshes.size());
-    meshVisible_.assign(scene->meshes.size(), true);
+    // A mesh drawn at exactly one place in the hierarchy can have its world
+    // transform folded into the vertex buffer, which removes two uniform matrix
+    // uploads per draw for the rest of the session. Meshes instanced at several
+    // nodes cannot, and keep the per-draw path.
+    const std::size_t meshCount = scene->meshes.size();
+    std::vector<int> instances(meshCount, 0);
+    std::vector<mat4> firstTransform(meshCount, mat4(1.0f));
+    scene->forEachMeshInstance([&](int, int meshIndex, const mat4& world) {
+        const auto index = static_cast<std::size_t>(meshIndex);
+        if (instances[index] == 0) firstTransform[index] = world;
+        ++instances[index];
+    });
+
+    gpuMeshes_.resize(meshCount);
+    meshVisible_.assign(meshCount, true);
+    transformBaked_.assign(meshCount, false);
+
     std::size_t bytes = 0;
-    for (std::size_t i = 0; i < scene->meshes.size(); ++i) {
-        gpuMeshes_[i].upload(scene->meshes[i]);
+    for (std::size_t i = 0; i < meshCount; ++i) {
+        transformBaked_[i] = instances[i] == 1;
+        gpuMeshes_[i].upload(scene->meshes[i],
+                             transformBaked_[i] ? firstTransform[i] : mat4(1.0f));
         bytes += gpuMeshes_[i].byteSize();
     }
 
@@ -259,6 +279,7 @@ void OpenGLBackend::setMeshVisible(int meshIndex, bool visible) {
     if (meshIndex >= 0 && meshIndex < static_cast<int>(meshVisible_.size())) {
         meshVisible_[static_cast<std::size_t>(meshIndex)] = visible;
     }
+    drawListDirty_ = true;
 }
 
 bool OpenGLBackend::meshVisible(int meshIndex) const {
@@ -266,21 +287,28 @@ bool OpenGLBackend::meshVisible(int meshIndex) const {
     return meshVisible_[static_cast<std::size_t>(meshIndex)];
 }
 
-void OpenGLBackend::showAllMeshes() { meshVisible_.assign(meshVisible_.size(), true); }
+void OpenGLBackend::showAllMeshes() {
+    meshVisible_.assign(meshVisible_.size(), true);
+    drawListDirty_ = true;
+}
 
-void OpenGLBackend::buildDrawList(const Camera& camera) {
+void OpenGLBackend::rebuildDrawList() {
     drawList_.clear();
+    drawListDirty_ = false;
     if (!scene_) return;
 
-    const vec3 eye = camera.position();
     scene_->forEachMeshInstance([&](int, int meshIndex, const mat4& world) {
         if (!meshVisible(meshIndex)) return;
         const scene::Mesh& mesh = scene_->meshes[static_cast<std::size_t>(meshIndex)];
 
         DrawItem item;
         item.meshIndex = meshIndex;
-        item.world = world;
-        item.viewDepth = glm::length(vec3(world * vec4(mesh.bounds.center(), 1.0f)) - eye);
+        item.material = mesh.material;
+        const bool baked = transformBaked_[static_cast<std::size_t>(meshIndex)];
+        item.baked = baked;
+        item.world = baked ? mat4(1.0f) : world;
+        item.normalMatrix = baked ? mat3(1.0f) : glm::transpose(glm::inverse(mat3(world)));
+        item.worldBounds = mesh.bounds.transformed(world);
         if (mesh.material >= 0 && mesh.material < static_cast<int>(scene_->materials.size())) {
             item.blended =
                 scene_->materials[static_cast<std::size_t>(mesh.material)].alphaMode ==
@@ -289,10 +317,41 @@ void OpenGLBackend::buildDrawList(const Camera& camera) {
         drawList_.push_back(item);
     });
 
-    // Back-to-front for the blended pass; the opaque pass keeps submission order.
+    // Opaque geometry is grouped by material so the draw loop can skip
+    // rebinding one it is already using: on a scene of thousands of meshes
+    // sharing a handful of materials, that turns thousands of binds into a
+    // handful. Blended geometry still has to go back to front for correctness,
+    // so it cannot be grouped.
     std::stable_sort(drawList_.begin(), drawList_.end(), [](const DrawItem& a, const DrawItem& b) {
         if (a.blended != b.blended) return !a.blended;
-        return a.blended ? a.viewDepth > b.viewDepth : false;
+        return a.material < b.material;
+    });
+}
+
+void OpenGLBackend::updateDrawList(const Camera& camera, int width, int height) {
+    if (drawListDirty_) rebuildDrawList();
+    if (drawList_.empty()) return;
+
+    const float aspect = static_cast<float>(std::max(width, 1)) / static_cast<float>(std::max(height, 1));
+    Frustum frustum;
+    frustum.extract(camera.viewProjection(aspect));
+
+    const vec3 eye = camera.position();
+    const auto firstBlended =
+        std::find_if(drawList_.begin(), drawList_.end(), [](const DrawItem& i) { return i.blended; });
+
+    for (auto it = drawList_.begin(); it != drawList_.end(); ++it) {
+        it->culled = !frustum.intersects(it->worldBounds);
+        // Only the blended half needs a distance, and only for sorting.
+        if (it >= firstBlended && !it->culled) {
+            it->viewDepth = glm::length(it->worldBounds.center() - eye);
+        }
+    }
+
+    // Transparency has to be drawn back to front, so that subrange is re-sorted
+    // whenever the camera moves. The opaque half stays grouped by material.
+    std::sort(firstBlended, drawList_.end(), [](const DrawItem& a, const DrawItem& b) {
+        return a.viewDepth > b.viewDepth;
     });
 }
 
@@ -326,11 +385,15 @@ void OpenGLBackend::bindMaterial(const scene::Material& material, const RenderSe
     meshShader_.set("uAlphaCutoff", material.alphaCutoff);
     meshShader_.set("uAlphaMode", static_cast<int>(material.alphaMode));
 
-    if (settings.doubleSidedOverride || material.doubleSided) {
-        glDisable(GL_CULL_FACE);
-    } else {
-        glEnable(GL_CULL_FACE);
-        glCullFace(GL_BACK);
+    const int wantCulling = (settings.doubleSidedOverride || material.doubleSided) ? 0 : 1;
+    if (wantCulling != cullFaceEnabled_) {
+        if (wantCulling == 1) {
+            glEnable(GL_CULL_FACE);
+            glCullFace(GL_BACK);
+        } else {
+            glDisable(GL_CULL_FACE);
+        }
+        cullFaceEnabled_ = wantCulling;
     }
 }
 
@@ -383,22 +446,40 @@ void OpenGLBackend::drawMeshes(const Camera& camera, const RenderSettings& setti
         glDepthMask(GL_FALSE);
     }
 
-    for (const DrawItem& item : drawList_) {
-        if (item.blended != blendedPass) continue;
+    // Another pass may have left different bindings in place, so trust nothing
+    // carried over from last time.
+    boundMaterial_ = -2;
+    cullFaceEnabled_ = -1;
 
-        const scene::Mesh& mesh = scene_->meshes[static_cast<std::size_t>(item.meshIndex)];
+    // Resolved once per pass instead of hashed once per draw.
+    const GLint modelLocation = meshShader_.locationOf("uModel");
+    const GLint normalMatrixLocation = meshShader_.locationOf("uNormalMatrix");
+    bool identityBound = false;
+
+    for (const DrawItem& item : drawList_) {
+        if (item.blended != blendedPass || item.culled) continue;
+
         const GpuMesh& gpuMesh = gpuMeshes_[static_cast<std::size_t>(item.meshIndex)];
         if (!gpuMesh.valid()) continue;
 
-        static const scene::Material kDefaultMaterial;
-        const scene::Material& material =
-            (mesh.material >= 0 && mesh.material < static_cast<int>(scene_->materials.size()))
-                ? scene_->materials[static_cast<std::size_t>(mesh.material)]
-                : kDefaultMaterial;
-        bindMaterial(material, settings);
+        // Sorting put equal materials next to each other, so this skips almost
+        // every material bind on a typical scene.
+        if (item.material != boundMaterial_) {
+            static const scene::Material kDefaultMaterial;
+            const scene::Material& material =
+                (item.material >= 0 && item.material < static_cast<int>(scene_->materials.size()))
+                    ? scene_->materials[static_cast<std::size_t>(item.material)]
+                    : kDefaultMaterial;
+            bindMaterial(material, settings);
+            boundMaterial_ = item.material;
+        }
 
-        meshShader_.set("uModel", item.world);
-        meshShader_.set("uNormalMatrix", glm::transpose(glm::inverse(mat3(item.world))));
+        // Consecutive baked meshes all want the identity, so upload it once.
+        if (!item.baked || !identityBound) {
+            glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(item.world));
+            glUniformMatrix3fv(normalMatrixLocation, 1, GL_FALSE, glm::value_ptr(item.normalMatrix));
+            identityBound = item.baked;
+        }
 
         gpuMesh.draw();
         ++stats_.drawCalls;
@@ -473,6 +554,7 @@ void OpenGLBackend::drawOverlays(const RenderSettings& settings, const mat4& vie
         lineShader_.set("uDepthBias", 1e-4f);
         glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
         for (const DrawItem& item : drawList_) {
+            if (item.culled) continue;
             const GpuMesh& gpuMesh = gpuMeshes_[static_cast<std::size_t>(item.meshIndex)];
             if (!gpuMesh.valid()) continue;
             lineShader_.set("uModel", item.world);
@@ -504,11 +586,14 @@ void OpenGLBackend::drawOverlays(const RenderSettings& settings, const mat4& vie
         lineShader_.set("uDepthBias", 0.0f);
         glBindVertexArray(boxVao_);
         for (const DrawItem& item : drawList_) {
-            const scene::Mesh& mesh = scene_->meshes[static_cast<std::size_t>(item.meshIndex)];
-            if (!mesh.bounds.valid()) continue;
-            // The shared unit cube is stretched onto each mesh's box.
-            mat4 model = glm::translate(item.world, mesh.bounds.min);
-            model = glm::scale(model, glm::max(mesh.bounds.size(), vec3(1e-6f)));
+            if (item.culled || !item.worldBounds.valid()) continue;
+            // Uses the precomputed world-space box, not the object-space one
+            // combined with item.world: a mesh whose transform was baked into
+            // its vertex buffer carries an identity matrix here, and pairing
+            // that with object-space bounds would draw the box in the wrong
+            // place entirely.
+            mat4 model = glm::translate(mat4(1.0f), item.worldBounds.min);
+            model = glm::scale(model, glm::max(item.worldBounds.size(), vec3(1e-6f)));
             lineShader_.set("uModel", model);
             glDrawArrays(GL_LINES, 0, 24);
             ++stats_.drawCalls;
@@ -544,6 +629,7 @@ void OpenGLBackend::drawOverlays(const RenderSettings& settings, const mat4& vie
         normalsShader_.set("uColor", vec4(0.30f, 0.65f, 1.0f, 1.0f));
 
         for (const DrawItem& item : drawList_) {
+            if (item.culled) continue;
             const GpuMesh& gpuMesh = gpuMeshes_[static_cast<std::size_t>(item.meshIndex)];
             if (!gpuMesh.valid()) continue;
             normalsShader_.set("uModel", item.world);
@@ -581,7 +667,7 @@ void OpenGLBackend::renderScene(const Camera& camera, const RenderSettings& sett
 
     if (settings.showBackground) drawBackground(settings);
 
-    buildDrawList(camera);
+    updateDrawList(camera, width, height);
     drawMeshes(camera, settings, viewProjection, /*blendedPass=*/false);
     if (settings.showGrid) drawGrid(camera, settings, viewProjection);
     drawMeshes(camera, settings, viewProjection, /*blendedPass=*/true);
